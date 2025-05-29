@@ -1,0 +1,32 @@
+#!/bin/bash
+
+
+# beam server
+CFLAGS="-I/opt/hdf5/1.8.20/include"
+LDFLAGS="-L/opt/hdf5/1.8.20/lib"
+
+# PAL ubuntu
+#CFLAGS="-I/usr/lib/x86_64-linux-gnu/hdf5/openmpi/include"
+#LDFLAGS="-L/usr/lib/x86_64-linux-gnu/hdf5/openmpi"
+
+# server
+#CFLAGS="-I/opt/hdf5/1.14.5/include"
+#LDFLAGS="-L/opt/hdf5/1.14.5/lib"
+
+mpicc -o felParticle felParticle.c -lm -lhdf5 ${CFLAGS} ${LDFLAGS}
+echo 'felParticle is made.'
+
+mpicc -o felField felField.c -lm -lhdf5 ${CFLAGS} ${LDFLAGS}
+echo 'felField is made.'
+
+mpicc -o farField farField.c -lm -lhdf5 ${CFLAGS} ${LDFLAGS}
+echo 'farField is made.'
+
+gcc -o fft fft.c -lm
+echo 'fft is made.'
+
+gcc -o fieldFFT fieldFFT.c -lm -lfftw3 -I/opt/fftw/3.3.8/include -L/opt/fftw/3.3.8/lib
+echo "two is made"
+
+mpicc -o phase1D phase1D.c -lm -lhdf5 ${CFLAGS} ${LDFLAGS}
+echo 'phase1D is made.'

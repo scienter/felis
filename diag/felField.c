@@ -1,0 +1,452 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <mpi.h>
+#include <hdf5.h>
+#include <hdf5_hl.h>
+#include <complex.h>
+
+
+void restoreIntMeta(char *fileName,char *dataName,int *data,int dataCnt);
+void restoreDoubleMeta(char *fileName,char *dataName,double *data,int dataCnt);
+void restore_ptclCnt_attr_HDF(int *cnt,char *fileName,char *groupName,char *dataName,char *attrName);
+void restore_Field_HDF(double *data,char *fileName,char *dataName,int sliceN,int subCnt,int start,int N);
+
+void main(int argc, char *argv[])
+{
+   int mode,initial,final,timeStep,division,step,i,j,sliceN,h,H,numHarmony,n;
+   int subP,nx,ny,N,sliceI,cenI,cenJ,initIndex,sum,*subCnt,*start,*harmony;
+   double theta,z,dz,bucketZ,minZ,powerCoef;
+   double minX,minY,dx,dy,x,y,norm;
+   double realX,imagX,sumDoubleX,Ax,phiX;
+   double realY,imagY,sumDoubleY,Ay,phiY;
+   double S0,S1,S2,S3;
+   double *Ux,*Uy,*Ez,**crossSumX,**crossSumY,**data;
+   char fileName[100],dataNameX[100],dataNameY[100],groupName[100],attrName[100],outName[100],crossFile[100];
+   FILE *out,*cenOut,*crossOut;
+   int myrank, nTasks;
+   MPI_Status status;
+
+   if(argc<4) {
+      printf("felField mode division initial final step\n");
+      printf("mode 1: crossSum\n");
+      printf("mode 2: field  at center\n");
+      printf("mode 3: stoke  at center\n");
+      exit(0);
+   } else ;
+
+   MPI_Init(&argc,&argv);
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks);
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+   mode=atoi(argv[1]);
+   division=atoi(argv[2]);
+   initial=atoi(argv[3]);
+   final=atoi(argv[4]);
+   timeStep=atoi(argv[5]);
+
+   for(step=initial; step<=final; step+=timeStep)
+   {
+      sprintf(fileName,"field%d.h5",step);
+      restoreIntMeta(fileName,"sliceN",&sliceN,1);
+      restoreIntMeta(fileName,"numHarmony",&numHarmony,1);
+      harmony = (int *)malloc(numHarmony*sizeof(int ));
+      restoreIntMeta(fileName,"harmony",harmony,numHarmony);
+
+      restoreIntMeta(fileName,"nx",&nx,1);
+      restoreIntMeta(fileName,"ny",&ny,1);
+      restoreDoubleMeta(fileName,"minZ",&minZ,1);
+      restoreDoubleMeta(fileName,"dz",&dz,1);
+      restoreDoubleMeta(fileName,"bucketZ",&bucketZ,1);
+      restoreDoubleMeta(fileName,"fieldNorm",&norm,1);
+      restoreDoubleMeta(fileName,"dx",&dx,1);
+      restoreDoubleMeta(fileName,"dy",&dy,1);
+      restoreDoubleMeta(fileName,"minX",&minX,1);
+      restoreDoubleMeta(fileName,"minY",&minY,1);
+
+      subCnt=(int *)malloc(division*sizeof(int ));
+      start=(int *)malloc((division+1)*sizeof(int ));
+      subP=sliceN/division;
+      for(i=0; i<division-1; i++) subCnt[i]=subP;
+      subCnt[division-1]=sliceN-subP*(division-1);
+      start[0]=0;
+      sum=0;
+      for(n=0; n<division; n++) {
+        start[n]=sum;
+        sum+=subCnt[n];
+      }
+      start[division]=sliceN;
+
+      for(h=0; h<numHarmony; h++) {
+
+         //setting file and memories
+         if(mode==1) {
+            H=harmony[h];
+            sprintf(outName,"%dCross%d",H,step);	
+            out=fopen(outName,"w");
+
+            crossSumX=(double **)malloc(nx*sizeof(double *));
+            crossSumY=(double **)malloc(nx*sizeof(double *));
+            for(i=0; i<nx; i++) {
+               crossSumX[i]=(double *)malloc(ny*sizeof(double ));
+               crossSumY[i]=(double *)malloc(ny*sizeof(double ));
+            }
+            for(i=0; i<nx; i++)
+               for(j=0; j<ny; j++) {
+                  crossSumX[i][j]=0.0;
+                  crossSumY[i][j]=0.0;
+               }
+         } else if(mode==2) {
+            H=harmony[h];
+            sprintf(outName,"%dcenField%d",H,step);	
+            out=fopen(outName,"w");
+
+            fprintf(out,"#x[m] \ty[m] \tampX \targX \tampY \targY\n");
+         } else if(mode==3) {
+            H=harmony[h];
+            sprintf(outName,"%dstoke%d",H,step);	
+            out=fopen(outName,"w");
+
+            fprintf(out,"#S0 \tS1 \tS2 \tS3\n");
+         }
+         
+         //--------------------------------------------------
+
+         H=harmony[h];
+         sprintf(dataNameX,"Ux%d",H);	
+         sprintf(dataNameY,"Uy%d",H);	
+         for(n=0; n<division; n++) {
+            N=nx*ny*2;
+            Ux=(double *)malloc(N*subCnt[n]*sizeof(double ));  
+            Uy=(double *)malloc(N*subCnt[n]*sizeof(double ));  
+
+            restore_Field_HDF(Ux,fileName,dataNameX,sliceN,subCnt[n],start[n],N);
+            restore_Field_HDF(Uy,fileName,dataNameY,sliceN,subCnt[n],start[n],N);
+
+            //calculation
+            if(mode==1) {
+               for(sliceI=start[n]; sliceI<start[n+1]; sliceI++) {
+                  initIndex=(sliceI-start[n])*nx*ny*2;
+                  for(i=0; i<nx; i++) {
+                     x=i*dx+minX;
+                     for(j=0; j<ny; j++) {
+	                y=j*dy+minY;
+                        realX=Ux[initIndex+j*nx*2+i*2+0]*norm;
+                        imagX=Ux[initIndex+j*nx*2+i*2+1]*norm;
+                        crossSumX[i][j]+=realX*realX+imagX*imagX;
+                        realY=Uy[initIndex+j*nx*2+i*2+0]*norm;
+                        imagY=Uy[initIndex+j*nx*2+i*2+1]*norm;
+                        crossSumY[i][j]+=realY*realY+imagY*imagY;
+                     }
+                  }
+               }
+            } else if(mode==2 || mode==3) {
+               for(sliceI=start[n]; sliceI<start[n+1]; sliceI++) {
+                  if(sliceI==sliceN/2) {
+                     initIndex=(sliceI-start[n])*nx*ny*2;
+                     for(i=0; i<nx; i++) {
+                        x=i*dx+minX;
+                        for(j=0; j<ny; j++) {
+	                   y=j*dy+minY;
+                           realX=Ux[initIndex+j*nx*2+i*2+0]*norm;
+                           imagX=Ux[initIndex+j*nx*2+i*2+1]*norm;
+                           Ax=cabs(realX+I*imagX);
+                           phiX=carg(realX+I*imagX);
+                           realY=Uy[initIndex+j*nx*2+i*2+0]*norm;
+                           imagY=Uy[initIndex+j*nx*2+i*2+1]*norm;
+                           Ay=cabs(realY+I*imagY);
+                           phiY=carg(realY+I*imagY);
+                          
+                           S0=Ax*Ax+Ay*Ay;
+                           S1=Ax*Ax-Ay*Ay;
+                           S2=2*Ax*Ay*cos(phiY-phiX);
+                           S3=2*Ax*Ay*sin(phiY-phiX); 
+                           if(mode==2) fprintf(out,"%g %g %g %g %g %g\n",x,y,Ax,phiX,Ay,phiY);
+                           else if(mode==3) fprintf(out,"%g %g %g %g %g %g\n",x,y,S0,S1,S2,S3);
+                        }
+                        fprintf(out,"\n");
+                     }      
+                  }
+               }      //End of for(sliceI)
+            } 
+
+            //-------------------------------------------------------
+
+
+            free(Ux);
+            free(Uy);
+
+            printf("division=%d, step=%d, H=%d\n",n,step,harmony[h]);
+         }   //End of for(division)
+
+         // save and free memories
+         if(mode==1) {
+            for(i=0; i<nx; i++) {
+               x=i*dx+minX;
+               for(j=0; j<ny; j++) {
+                  y=j*dy+minY;
+                  fprintf(out,"%g %g %g %g\n",x,y,crossSumX[i][j],crossSumY[i][j]);
+               }
+	       fprintf(out,"\n");
+            }
+            fclose(out);	
+            printf("%s is made.\n",outName);
+
+            for(i=0; i<nx; i++) {
+               free(crossSumX[i]); 
+               free(crossSumY[i]); 
+            }
+            free(crossSumX);
+            free(crossSumY);
+         } else if(mode==2 || mode==3) {
+            fclose(out);	
+            printf("%s is made.\n",outName);
+
+         }
+         //----------------------------------------------------
+
+      }      //End of for(harmony)
+
+      free(subCnt);
+      free(start);
+      free(harmony);
+
+   }
+}
+
+
+/*
+
+         for(h=0; h<numHarmony; h++) {
+            sprintf(crossFile,"%dCross%d",H,step);	
+            crossOut=fopen(crossFile,"w");
+
+            sprintf(dataNameX,"Ux%d",H);	
+            sprintf(dataNameY,"Uy%d",H);	
+            for(n=0; n<division; n++) {
+               N=nx*ny*2;
+               Ux=(double *)malloc(N*subCnt[n]*sizeof(double ));  
+               Uy=(double *)malloc(N*subCnt[n]*sizeof(double ));  
+
+          restore_Field_HDF(Ux,fileName,dataNameX,sliceN,subCnt[n],start[n],N);
+          restore_Field_HDF(Uy,fileName,dataNameY,sliceN,subCnt[n],start[n],N);
+
+          // save longitudinal profile
+          cenI=nx/2; cenJ=ny/2;
+          for(sliceI=0; sliceI<subCnt[n]; sliceI++) {
+            z=(sliceI+start[n])*bucketZ+step*dz+minZ;
+
+            sumRealX=sumImagX=sumDoubleX=0.0;
+            sumRealY=sumImagY=sumDoubleY=0.0;
+            for(i=0; i<nx; i++)
+              for(j=0; j<ny; j++) {
+                realX=Ux[sliceI*N+j*nx*2+i*2+0];
+                imagX=Ux[sliceI*N+j*nx*2+i*2+1];
+                realY=Uy[sliceI*N+j*nx*2+i*2+0];
+                imagY=Uy[sliceI*N+j*nx*2+i*2+1];
+                sumDoubleX+=realX*realX+imagX*imagX;
+                sumDoubleY+=realY*realY+imagY*imagY;
+              }
+            fprintf(cenOut,"%.15g %g %g %g %g %g %g\n",z,realX,imagX,sumDoubleX*norm,realY,imagY,sumDoubleY*norm);
+          }
+
+	  // crossSum 
+	  printf("start[%d]=%d, start[%d]=%d\n",n,start[n],n+1,start[n+1]);
+
+	  free(Ux);
+	  free(Uy);
+	  printf("%d/%d is done at step=%d, harmony=%d\n",n,division,step,H);
+        }
+
+      }
+
+      for(h=0; h<numHarmony; h++) {
+        H=harmony[h];
+        sprintf(cenFile,"%dPower%d",H,step);	
+        cenOut=fopen(cenFile,"w");
+        sprintf(crossFile,"%dCross%d",H,step);	
+        crossOut=fopen(crossFile,"w");
+
+
+
+        sprintf(dataNameX,"Ux%d",H);	
+        sprintf(dataNameY,"Uy%d",H);	
+        for(n=0; n<division; n++) {
+          N=nx*ny*2;
+          Ux=(double *)malloc(N*subCnt[n]*sizeof(double ));  
+          Uy=(double *)malloc(N*subCnt[n]*sizeof(double ));  
+
+          restore_Field_HDF(Ux,fileName,dataNameX,sliceN,subCnt[n],start[n],N);
+          restore_Field_HDF(Uy,fileName,dataNameY,sliceN,subCnt[n],start[n],N);
+
+          // save longitudinal profile
+          cenI=nx/2; cenJ=ny/2;
+          for(sliceI=0; sliceI<subCnt[n]; sliceI++) {
+            z=(sliceI+start[n])*bucketZ+step*dz+minZ;
+
+            sumRealX=sumImagX=sumDoubleX=0.0;
+            sumRealY=sumImagY=sumDoubleY=0.0;
+            for(i=0; i<nx; i++)
+              for(j=0; j<ny; j++) {
+                realX=Ux[sliceI*N+j*nx*2+i*2+0];
+                imagX=Ux[sliceI*N+j*nx*2+i*2+1];
+                realY=Uy[sliceI*N+j*nx*2+i*2+0];
+                imagY=Uy[sliceI*N+j*nx*2+i*2+1];
+                sumDoubleX+=realX*realX+imagX*imagX;
+                sumDoubleY+=realY*realY+imagY*imagY;
+              }
+            fprintf(cenOut,"%.15g %g %g %g %g %g %g\n",z,realX,imagX,sumDoubleX*norm,realY,imagY,sumDoubleY*norm);
+          }
+
+	  // crossSum 
+	  printf("start[%d]=%d, start[%d]=%d\n",n,start[n],n+1,start[n+1]);
+          for(sliceI=start[n]; sliceI<start[n+1]; sliceI++) {
+            initIndex=(sliceI-start[n])*nx*ny*2;
+            for(i=0; i<nx; i++) {
+	      x=i*dx+minX;
+              for(j=0; j<ny; j++) {
+	        y=j*dy+minY;
+	        realX=Ux[initIndex+j*nx*2+i*2+0]*norm;
+	        imagX=Ux[initIndex+j*nx*2+i*2+1]*norm;
+                crossSumX[i][j]+=realX*realX+imagX*imagX;
+	        realY=Uy[initIndex+j*nx*2+i*2+0]*norm;
+	        imagY=Uy[initIndex+j*nx*2+i*2+1]*norm;
+                crossSumY[i][j]+=realY*realY+imagY*imagY;
+              }
+            }
+          }
+
+	  free(Ux);
+	  free(Uy);
+	  printf("%d/%d is done at step=%d, harmony=%d\n",n,division,step,H);
+        }
+
+
+
+        fclose(cenOut);	
+        printf("%s is made.\n",cenFile);
+        fclose(crossOut);	
+        printf("%s is made.\n",crossFile);
+      }		//End of harmony
+
+//      for(i=0; i<division; i++) 
+//      printf("step=%d,subCnt[%d]=%d, start[%d]=%d\n",step,i,subCnt[i],i,start[i]);
+
+   }
+
+}
+*/
+
+void restoreIntMeta(char *fileName,char *dataName,int *data,int dataCnt)
+{
+  hid_t file_id,dset_id,filespace;
+  hsize_t metaDim[1];
+  herr_t status;
+
+  metaDim[0]=dataCnt;
+
+  file_id=H5Fopen(fileName,H5F_ACC_RDWR,H5P_DEFAULT);
+  filespace=H5Screate_simple(1,metaDim,NULL);
+  dset_id=H5Dopen2(file_id,dataName,H5P_DEFAULT);
+  status=H5Dread(dset_id,H5T_NATIVE_INT,H5S_ALL,H5S_ALL,H5P_DEFAULT,data);
+  H5Dclose(dset_id);
+  H5Sclose(filespace);
+  H5Fclose(file_id);
+}
+
+void restoreDoubleMeta(char *fileName,char *dataName,double *data,int dataCnt)
+{
+  hid_t file_id,dset_id,filespace;
+  hsize_t metaDim[1];
+  herr_t status;
+
+  metaDim[0]=dataCnt;
+
+  file_id=H5Fopen(fileName,H5F_ACC_RDWR,H5P_DEFAULT);
+  filespace=H5Screate_simple(1,metaDim,NULL);
+  dset_id=H5Dopen2(file_id,dataName,H5P_DEFAULT);
+  status=H5Dread(dset_id,H5T_NATIVE_DOUBLE,H5S_ALL,H5S_ALL,H5P_DEFAULT,data);
+  H5Dclose(dset_id);
+  H5Sclose(filespace);
+  H5Fclose(file_id);
+}
+
+void restore_Field_HDF(double *data,char *fileName,char *dataName,int sliceN,int subCnt,int start,int N)
+{
+   hid_t file_id,group_id,plist_id,dset_id,attr_id,as_id;
+   hid_t dataspace,memspace;
+   hsize_t dimsf[2],offset[2],count[2];
+   herr_t ierr;
+
+   //open file
+   file_id=H5Fopen(fileName,H5F_ACC_RDONLY,H5P_DEFAULT);
+
+   //set dataset
+   dset_id=H5Dopen(file_id,dataName,H5P_DEFAULT);
+
+   dataspace=H5Dget_space(dset_id);
+
+   // define hyperslab in the dataset
+   offset[0]=start;  offset[1]=0;
+   count[0]=subCnt;  count[1]=N;
+   H5Sselect_hyperslab(dataspace,H5S_SELECT_SET,offset,NULL,count,NULL);
+
+   //memory dataspace
+   dimsf[0]=subCnt;
+   dimsf[1]=N;
+   memspace=H5Screate_simple(2,dimsf,NULL);
+
+   // define memory hyperslab
+   offset[0]=0;  offset[1]=0;
+   count[0]=subCnt;  count[1]=N;
+   H5Sselect_hyperslab(memspace,H5S_SELECT_SET,offset,NULL,count,NULL);
+
+   //read the dataset
+   H5Dread(dset_id,H5T_NATIVE_DOUBLE,memspace,dataspace,H5P_DEFAULT,data);
+
+//   H5Pclose(plist_id);
+   H5Dclose(dset_id);
+   H5Sclose(memspace);
+   H5Sclose(dataspace);
+   //close the file
+//   H5Gclose(group_id);
+   H5Fclose(file_id);
+}
+
+void restore_ptclCnt_attr_HDF(int *cnt,char *fileName,char *groupName,char *dataName,char *attrName)
+{
+   int myrank, nTasks;
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks);
+
+   hid_t file_id,group_id,plist_id,dataset_id,attribute_id,dataspace_id;
+   hsize_t dims;
+   herr_t ierr;
+
+   //open file
+   file_id=H5Fopen(fileName,H5F_ACC_RDWR,H5P_DEFAULT);
+//   ierr=H5Pclose(plist_id);
+
+   //open a group
+   group_id=H5Gopen2(file_id,groupName,H5P_DEFAULT);
+
+   //Open an existing dataset.
+   dataset_id = H5Dopen2(group_id,dataName,H5P_DEFAULT);
+
+   // Create dataspace for attribute  
+//   dims=1;
+//   dataspace_id=H5Screate_simple(1,&dims,NULL);
+
+   // open a dataset attribute
+   attribute_id=H5Aopen(dataset_id,attrName,H5P_DEFAULT);
+
+   // read the dataset
+   H5Aread(attribute_id,H5T_NATIVE_INT,cnt);
+
+   H5Aclose(attribute_id);
+//   H5Sclose(dataspace_id);
+   H5Dclose(dataset_id);
+   H5Gclose(group_id);
+   H5Fclose(file_id);
+}
+

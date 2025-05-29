@@ -1,0 +1,147 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <complex.h>
+
+int main(int argc, char *argv[])
+{
+	int step,i,j,ii,jj,numXY,nx,ny,numX,numY,cnt;
+	double lambdaU,k0,targetZ,rangeXY,minX,minY,dx,dy,dX,dY;
+   double x,y,z,X,Y,rVal,iVal,phase;
+	double *dataX,*dataY;
+   double complex **data,**field,sumComp;
+   FILE *in,*out;
+   char fileName[100],reFileName[100];
+
+   if(argc < 6)   { 
+      printf("farField step k0 lambdaU targetZ rangeXY numXY\n");
+      exit(0);
+   }
+
+   step = atoi(argv[1]);
+   k0 = atof(argv[2]);
+   lambdaU = atof(argv[3]);
+   targetZ = atof(argv[4]);
+   rangeXY = atof(argv[5]);
+   numXY = atoi(argv[6]);
+	numX=numY=numXY;
+	z = lambdaU*step;
+
+   sprintf(fileName,"1Cross%d",step); 
+   if(fopen(fileName,"r")==NULL) {
+     printf("%s is not exited.\n",fileName);
+	  exit(0);
+   } else {
+     in = fopen(fileName,"r");
+     cnt=0;
+     while(fscanf(in,"%lf %lf %lf %lf",&x,&y,&rVal,&iVal)!=EOF) 
+       cnt++;
+     fclose(in);
+   }
+
+   nx=ny=sqrt(cnt);
+	printf("File scale is nx=%d,ny=%d\n",nx,ny);
+
+   minX=minY=-0.5*rangeXY;
+	dX=dY=rangeXY/(numXY*1.0);
+
+   dataX=(double *)malloc(nx*sizeof(double ));
+   dataY=(double *)malloc(ny*sizeof(double ));
+	
+   data=(double complex **)malloc(nx*sizeof(double complex *));
+	for(i=0; i<nx; i++)
+     data[i]=(double complex *)malloc(ny*sizeof(double complex ));
+	for(i=0; i<nx; i++)
+	  for(j=0; j<ny; j++)
+       data[i][j]=0.0+I*0.0;
+
+   field=(double complex **)malloc(numX*sizeof(double complex *));
+	for(i=0; i<numX; i++)
+     field[i]=(double complex *)malloc(numY*sizeof(double complex ));
+	for(i=0; i<numX; i++)
+	  for(j=0; j<numY; j++)
+       field[i][j]=0.0+I*0.0;
+
+   in = fopen(fileName,"r");
+   cnt=0;
+   while(fscanf(in,"%lf %lf %lf %lf",&x,&y,&rVal,&iVal)!=EOF) {
+	  i=cnt/ny;
+	  j=cnt%ny;
+	  dataX[i]=x;
+	  dataY[j]=y;
+	  data[i][j]=rVal+I*iVal;
+     cnt++;
+	}
+   fclose(in);
+	dx=dataX[1]-dataX[0];
+	dy=dataY[1]-dataY[0];
+
+/*
+   sprintf(reFileName,"re%s",fileName);
+   out = fopen(reFileName,"w");
+   for(i=0; i<nx; i++) {
+	  x=dataX[i];
+     for(j=0; j<ny; j++) {
+	    y=dataY[j];
+		 rVal=creal(data[i][j]);
+		 iVal=cimag(data[i][j]);
+       fprintf(out,"%g %g %g %g\n",x,y,rVal,iVal);
+     }
+     fprintf(out,"\n");
+   }
+   fclose(out);    
+   printf("%s is made.\n",reFileName);
+*/	
+
+   printf("z=%g, targetZ=%g, targetZ-z=%g\n",z,targetZ,targetZ-z);   
+      
+   for(ii=0; ii<numX; ii++) { 
+     X=minX+ii*dX;
+     for(jj=0; jj<numY; jj++) { 
+       Y=minY+jj*dY;
+
+		 sumComp=0.0+I*0.0;
+       for(i=0; i<nx; i++) { 
+         x=dataX[i];
+         for(j=0; j<ny; j++) { 
+           y=dataY[j];
+			  phase = k0*((X-x)*(X-x)+(Y-y)*(Y-y))*0.5/(targetZ-z);
+           sumComp += data[i][j]*cexp(-I*phase)*dx*dy;
+			}
+		 }
+
+		 field[ii][jj] = cexp(-I*k0*(targetZ-z))/(targetZ-z)*sumComp;
+//		 field[ii][jj] = phase;
+	  }
+	  printf("ii=%d, numX=%d\n",ii,numX);
+	}
+  
+   sprintf(reFileName,"%s_%g",fileName,targetZ);
+   out = fopen(reFileName,"w");
+   for(ii=0; ii<numX; ii++) {
+	  x=minX+ii*dX;
+     for(jj=0; jj<numY; jj++) {
+	    y=minY+jj*dY;
+		 rVal=creal(field[ii][jj]);
+		 iVal=cimag(field[ii][jj]);
+       fprintf(out,"%g %g %g %g\n",x,y,rVal,iVal);
+     }
+     fprintf(out,"\n");
+   }
+   fclose(out);    
+   printf("%s is made.\n",reFileName);
+  
+         
+   for(i=0; i<nx; i++) 
+     free(data[i]);
+   free(data);
+
+   for(i=0; i<numX; i++) 
+     free(field[i]);
+   free(field);
+
+   free(dataX);
+   free(dataY);
+   return 0;
+
+}

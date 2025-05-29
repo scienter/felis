@@ -1,0 +1,11 @@
+mpicc -o felParticle -I/usr/lib/x86_64-linux-gnu/hdf5/openmpi/include -L/usr/lib/x86_64-linux-gnu/hdf5/openmpi felParticle.c -lm -lhdf5
+echo 'felParticle is made.'
+
+mpicc -o felField -I/usr/lib/x86_64-linux-gnu/hdf5/openmpi/include -L/usr/lib/x86_64-linux-gnu/hdf5/openmpi felField.c -lm -lhdf5
+echo 'felField is made.'
+
+mpicc -o farField -I/usr/lib/x86_64-linux-gnu/hdf5/openmpi/include -L/usr/lib/x86_64-linux-gnu/hdf5/openmpi farField.c -lm -lhdf5
+echo 'farField is made.'
+
+gcc -o fft fft.c -lm
+echo 'fft is made.'

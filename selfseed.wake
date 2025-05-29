@@ -1,0 +1,318 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <mpi.h>
+#include <math.h>
+#include "mesh.h"
+#include "constants.h"
+#include <gsl/gsl_sf_bessel.h>
+#include <gsl/gsl_qrng.h>
+#include <gsl/gsl_randist.h>
+
+double complex ***complexMemory3Asign(int harmony,int nz,int nx,int ny);
+void complexDeleteField3(double complex ***field,int harmony,int subNz);
+
+
+void washingOut(Domain *D,int iteration)
+{
+   int i,m,startI,endI,s,n,numInBeamlet;
+	double dg,aveTh,minTh,theta,an,bn,noise,sigma,eNumbers,noiseONOFF;
+   Particle *particle;
+   particle=D->particle;
+   LoadList *LL;
+   ptclList *p;
+
+   int nTasks,myrank;
+   MPI_Status status;
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks);
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+   const gsl_rng_type * T;
+   gsl_rng *ran;
+
+   gsl_rng_env_setup();
+   T = gsl_rng_default;
+   ran = gsl_rng_alloc(T);
+
+   startI=1;  endI=D->subSliceN+1;
+	noiseONOFF=D->chi_noiseONOFF;
+
+	LL=D->loadList;
+   s=0;
+   while(LL->next) {
+      numInBeamlet=LL->numInBeamlet;
+		dg=2*M_PI/(numInBeamlet*1.0);
+      
+      for(i=startI; i<endI; i++)
+      {
+	      p=particle[i].head[s]->pt;
+		   while(p)  {
+			   aveTh=0.0;
+			   for(n=0; n<numInBeamlet; n++) aveTh+=p->theta[n];
+				aveTh/=1.0*numInBeamlet;
+
+				eNumbers=p->weight*numInBeamlet;
+				if(eNumbers<10) eNumbers=10; else ; 
+
+				minTh=aveTh-M_PI;
+			   for(n=0; n<numInBeamlet; n++) {
+				   theta=minTh+n*dg;
+		         noise=0.0;
+               for(m=1; m<=numInBeamlet/2; m++) {
+			         sigma=sqrt(2.0/eNumbers/(m*m*1.0));     //Fawley PRSTAB V5 070701 (2002)
+				      //an=gaussianDist_1D(sigma);
+						//bn=gaussianDist_1D(sigma);
+						an=gsl_ran_gaussian(ran,sigma);
+						bn=gsl_ran_gaussian(ran,sigma);
+						noise += an*cos(m*theta)+bn*sin(m*theta);
+			      }
+				   p->theta[n]=theta; // + noise*noiseONOFF;
+            }
+				p=p->next;
+			}
+		}
+
+      LL=LL->next;
+		s++;
+	}
+	gsl_rng_free(ran);
+}
+
+void selfSeed_Field(Domain *D,int iteration)
+{
+   int h,i,j,n,rank,N,startI,endI,numHarmony,minI,maxI,nn,ii;
+	int dataNum,start,sliceN,subN,*minmax,numSlice,indexI;
+	double delayT,dt,val,tmp,tau,ctau,arg,coef,sinTh;
+	double k0,shiftT,d,extincL,*sendData,*recvData,realV,imagV,*U,J,result;
+	double complex chi0,compTmp,compVal,compFirst,compResult;
+   int myrank, nTasks;
+	FILE *out;
+
+   MPI_Status status;
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks);
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+	numHarmony=D->numHarmony;
+   startI=1;  endI=D->subSliceN+1;
+	minI=D->minI; maxI=D->maxI;
+	sliceN=D->sliceN;
+   N=D->nx*D->ny;
+
+   dt = D->lambda0*D->numLambdaU/velocityC;
+	delayT = D->chi_delay;
+	sinTh = sin(D->bragTh);
+	d=D->chi_d;
+	extincL=D->extincL;
+	chi0=D->chi0;
+	k0=D->ks;
+   coef=d/(4*sinTh*extincL*extincL);	
+
+	dataNum=2*N*sliceN;
+   sendData=(double *)malloc(dataNum*sizeof(double ));
+   recvData=(double *)malloc(dataNum*sizeof(double ));
+   U=(double *)malloc(dataNum*sizeof(double ));
+	for(i=0; i<dataNum; i++) U[i]=0.0;
+   numSlice=sliceN;
+
+   h=0;
+   for(i=startI; i<endI; i++) 
+	{
+      shiftT=(sliceN - (minI+i-startI))*dt + delayT;
+
+      for(j=0; j<N; j++) 
+		{
+         //val=cabs(D->U[h][i][j]);
+         compVal=D->U[h][i][j];
+		  
+         for(nn=0; nn<numSlice; nn++) {
+            tau = shiftT-nn*dt;
+			   if(tau>=0) {
+               ctau=velocityC*tau;
+               tmp=ctau*(2.0*d/sinTh+ctau/sinTh/sinTh);
+	            if(tmp==0.0) J=0.5;
+	            //else if(tmp<0) {
+		         //  arg=M_PI/extincL*sqrt(fabs(tmp));
+		         //  J=gsl_sf_bessel_I1(arg); J/=arg;
+				   //  J*=-I;
+			      //} 
+				   else {
+			         arg=0.5/extincL*sqrt(tmp);
+			         J=gsl_sf_bessel_J1(arg); J/=arg;
+			      }
+
+               compTmp=chi0*k0*(d+ctau/sinTh)/2.0/sinTh;
+               compFirst=cexp(I*compTmp);  //ver 3
+               compResult=coef*compFirst*J*compVal;
+               //result=coef*J*val;
+               U[nn*N*2 + j*2 + 0]+=creal(compResult)*dt*velocityC;
+               U[nn*N*2 + j*2 + 1]+=cimag(compResult)*dt*velocityC;
+			   } else ;
+         }
+		}
+	}
+	 
+   for(i=0; i<dataNum; i++) sendData[i]=U[i];
+   if(myrank==0)  {
+      for(rank=1; rank<nTasks; rank++) {
+         MPI_Recv(recvData,dataNum,MPI_DOUBLE,rank,rank,MPI_COMM_WORLD,&status);
+		   for(i=0; i<dataNum; i++)  U[i]+=recvData[i];
+      }
+	} else {
+      for(rank=1; rank<nTasks; rank++) {
+	      if(myrank==rank) MPI_Send(sendData,dataNum,MPI_DOUBLE,0,myrank,MPI_COMM_WORLD);
+      }
+	}
+   MPI_Barrier(MPI_COMM_WORLD);
+   MPI_Bcast(U,dataNum,MPI_DOUBLE,0,MPI_COMM_WORLD);
+
+   h=0;
+      for(i=startI; i<endI; i++) {
+         nn=minI+i-startI;
+         //ctau = (shiftT-(nn-1)*dt)*velocityC;
+         //compTmp=chi0*k0*(d+ctau/sinTh)/2.0/sinTh;
+         for(j=0; j<N; j++) { 
+            //realV=U[h*numSlice*N*2 + nn*(N*2) + j*2 + 0];
+            //imagV=U[h*numSlice*N*2 + nn*(N*2) + j*2 + 1];
+            compVal=U[nn*N*2 + j*2]+I*U[nn*N*2 + j*2 + 1];
+            D->U[h][i][j]=compVal;
+		   }
+      }
+
+   free(U);
+	free(sendData);
+	free(recvData);
+}
+
+
+void seed_Field_test(Domain *D,int iteration)
+{
+   int nn;
+	double delayT,dt,tmp,tau,ctau,arg,coef,sinTh;
+	double k0,shiftT,d,extincL,maxT;
+	double complex chi0,tmpComp,compVal,first,result,*U,*listJ,J;
+   FILE *out;
+   char fileName[100];
+   int myrank, nTasks;
+   ChiList *Chi;
+   Chi=D->chiList;
+
+   MPI_Status status;
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks);
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+   dt = D->lambda0*D->numLambdaU/velocityC;
+	delayT = Chi->delay;
+	sinTh = sin(Chi->bragTh);
+	d=Chi->d;
+	extincL=Chi->extincL;
+	chi0=Chi->chi0;
+	k0=D->ks;
+   coef=M_PI*M_PI*Chi->d*sinTh/(Chi->extincL*Chi->extincL);	
+   if(myrank==0) printf("bragg=%g, extincL=%g\n",Chi->bragTh*180/M_PI,extincL); else ;
+
+   U=(double complex *)malloc(200*sizeof(double complex));
+   listJ=(double complex *)malloc(200*sizeof(double complex));
+   maxT=100e-15;
+   dt=maxT/200.0;
+
+   for(nn=0; nn<200; nn++) {
+      tau = nn*dt;
+      ctau=velocityC*tau;
+
+      tmp=ctau*(2.0*d/sinTh+ctau/sinTh/sinTh);
+      if(tmp==0.0) J=0.5;
+      else if(tmp<0) {
+        arg=M_PI/extincL*sqrt(fabs(tmp));
+        J=gsl_sf_bessel_I1(arg); J/=arg;
+        J*=-I;
+		} else {
+		  arg=M_PI/extincL*sqrt(tmp);
+		  J=gsl_sf_bessel_J1(arg); J/=arg;
+		}
+
+      listJ[nn]=J;
+
+      tmpComp=chi0*k0*(d+ctau/sinTh)/2.0/sinTh;
+      first=cexp(I*tmpComp);
+      result=coef*first*J;
+      
+      U[nn]=result;
+   }
+
+   if(myrank==0) {
+      sprintf(fileName,"sswake");
+      out=fopen(fileName,"w");
+      for(nn=0; nn<200; nn++) {
+        tau = nn*dt;
+        fprintf(out,"%g %g %g\n",tau,cabs(U[nn]),cabs(listJ[nn]));
+      }
+      fclose(out);
+      printf("%s is made.\n",fileName);
+    }
+
+   free(U);
+   free(listJ);
+}
+
+
+void whatCrystal(double ks,ChiList *Chi,char *str)
+{
+   double d,chi0R,chi0I,energy;
+	double a0,a1,a2,a3,a4,a5,a6;
+	double b0,b1,b2,b3,b4,b5,b6;
+   int myrank, nTasks;
+   MPI_Status status;
+
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks);     
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);     
+
+   energy=ks*velocityC*hbar;   //eV
+	if(energy<4000) {
+	   if(myrank==0) 
+		   printf("photon energy is %g eV, which is not allowed for now!\n",energy); 
+		else ;
+		exit(0);
+	} else ;
+
+   if(strstr(str,"Diamond_220"))  {
+      d=1.261061E-10;     //grating constant
+
+      if(energy<12000) {
+	      a0=-0.225282;
+	      a1=-1994.24;
+         b0=1.88132e-05;
+         b1=-5.31208e-10;
+      } else {
+         a0=-0.0528651;
+         a1=-6814.76;
+         b0=0.0;
+         b1=0.0;
+      }
+	   chi0R=a0/(energy+a1) + b0+b1*energy;
+      if(energy<12000) {
+         a0=-0.000495555;
+	      a1=-3529.73;
+	      b0=1.20412e-07;
+	      b1=-5.66126e-12;
+      } else {
+         a0=-1.26205e-05;
+         a1=-10024;
+         b0=0.0;
+         b1=0.0;
+      }
+	   chi0I=a0/(energy+a1) + b0+b1*energy;
+	   Chi->chi0=chi0R+I*chi0I;
+	   a0=-0.0564357;
+	   a1=0.00043456;
+	   Chi->extincL=(a0+a1*energy)*1e-6*2*M_PI;
+	   Chi->bragTh=asin(M_PI/(d*ks));
+   }	
+   else   {
+      printf("No crystall! Define the crystall\n"); 
+      exit(0);
+   }
+}
+
+
+
+

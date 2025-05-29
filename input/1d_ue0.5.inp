@@ -1,0 +1,165 @@
+
+[Phase_shifter]
+ number = 0
+ start_position = 54	//[m]
+ interval_length = 6		//[m]
+ phase=.4
+
+[Save]
+ field_save=OFF
+ particle_save=OFF
+ density_save=OFF
+ current_save=OFF
+ dump_save=OFF
+
+ field_format=TXT
+ particle_format=TXT
+ current_format=TXT
+ density_format=TXT
+ dump_format=HDF
+
+ dump_start=1000
+ dump_step=1000
+
+ max_time=3500			//[minute]
+
+// max_step=10
+ total_length=60	//[m]
+ save_step=20
+ save_start=0
+
+[Domain]
+
+ dimension=1
+ //mode=Static
+ // mode=Twiss
+ mode=Time_Dependent
+ minZ=-3			// [um]  For Time_Dependant
+ maxZ=4			// [um]  For Time_Dependant
+ minX=-300			// [um]
+ maxX=300				// [um]
+ minY=-300			// [um]
+ maxY=300				// [um]
+ nx=201
+ ny=201
+
+ photon_energy=9700             // [eV]
+ num_harmony=1
+ harmony0 = 1
+ harmony1 = 3
+ harmony2 = 5
+
+ slices_in_bucket=10
+ lambdaUs_in_iteration=10	// number of lambdaU for one iteration
+
+ ABC_N=10                        // default=10
+ ABC_coef=1                      // default=1
+
+[Space_charge]
+ activate = ON
+ number_fourier_mode = 1
+ number_longitudinal_mode = 1
+ radial_grids = 100
+
+[Seed]
+ power=0			// [W]
+ rms_duration=30		// [fs]
+ spot_sigma_R=20		// [um]
+ focus=1			// [m]
+
+[Undulator]
+ undulator_mode = Normal        // Normal or AppleX
+ polarity = 0.5                   // ue [0 ~ 1]
+ K0_alpha = 1                   // 1:By, -1:Bx
+ numbers=10
+ air=OFF
+ linear_taper = -2.0e-4
+ quad_taper_start_index = 20	// [undulator ID for start]
+ quad_taper = -2.4e-4
+ slope_of_B = -0.00		// [T/m]
+ lambdaU = 2.6			// [cm]
+
+ unit_start = 0.0			// [m]
+ unit_end = 6.0			// [m]
+ undulator_start = 0.5		// [m]
+ undulator_end = 5.5		// [m]
+ //K0 = 1.87			
+
+[Wake_field]
+ activate = ON
+ shape = Flat
+ ac_dc = AC
+ radius = 4.5e-3                // [m]
+ conductivity = 3.03e7          //
+ ctau = 2.4e-6                  // relaxation_time X c [m]
+
+[Chicane]
+ chicane_ONOFF=OFF
+ delay_time = 0.1					//[fs]
+ position_z = 51					//[m]
+ dipole_length = 0.4				//[m]
+ dipole_distance_1 = 1.4		//[m]
+ dipole_distance_2 = 1.4		//[m]
+
+
+
+[Quad]
+ numbers=13
+
+ unit_start = -0.0325		// [m]
+ unit_end = 9.9675			// [m]
+ quad_start = -0.0325		// [m]
+ quad_end = 0.0325			// [m]
+ g = 41				// [T/m]
+
+[Quad]
+ numbers=13
+
+ unit_start = 4.9675		// [m]
+ unit_end = 14.9675			// [m]
+ quad_start = 4.9675		// [m]
+ quad_end = 5.0325			// [m]
+ g = -40.5				// [T/m]
+
+
+[EBeam]
+ load_type = Polygon
+ noise_ONOFF = ON
+ random_seed_ONOFF = OFF
+
+ species=Electron
+ beam_energy=8544		// [MeV]
+ energy_spread=0.01		// [%]
+ peak_current=2700		// [A]
+ norm_emittance_x=0.5             // [mm mrad]
+ norm_emittance_y=0.5             // [mm mrad]
+ beta_x=27			// [m]
+ beta_y=16        	// [m]
+ alpha_x=0.0			
+ alpha_y=0.0             	
+ beamlets_in_bucket=1000
+ number_in_beamlet=4
+
+ z_nodes=2
+ z0=-3.0e-6
+ z1=3e-6
+ z_n0=1
+ z_n1=1
+
+ energy_nodes=2
+ energy_z0=-3e-6
+ energy_z1=3e-6
+ energy_n0= 1.00
+ energy_n1=1.00
+
+ energySpread_nodes=2
+ energySpread_z0=-3e-6
+ energySpread_z1=3e-6
+ energySpread_n0=1
+ energySpread_n1=1
+
+ emit_nodes=2
+ emit_z0=-3e-6
+ emit_z1=3e-6
+ emit_n0=1
+ emit_n1=1

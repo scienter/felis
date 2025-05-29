@@ -1,0 +1,830 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include "mesh.h"
+#include "constants.h"
+#include <math.h>
+#include <mpi.h>
+#include <gsl/gsl_sf_bessel.h>
+#include <complex.h>
+
+void transversePush_3D(Domain *D,int iteration);
+void push_theta_gamma_3D(Domain *D,int iteration);
+void push_theta_gamma_1D(Domain *D,int iteration);
+void drift_theta_gamma_3D(Domain *D,int iteration);
+void drift_theta_gamma_1D(Domain *D,int iteration);
+
+
+
+void dS_dz(double *S,double *dS,double *coef)
+{
+   double X=S[0], Y=S[1], px=S[2], py=S[3];
+   double aa=coef[1], bb=coef[2], cc=coef[3];
+   double invG=1.0/coef[0];
+   dS[0] = px*invG - aa*(X+Y);
+   dS[1] = py*invG + aa*(X-Y);
+   dS[2] = (px-py)*aa - (bb+cc)*X;
+   dS[3] = (px+py)*aa - (bb-cc)*Y;
+}
+
+void rk4_S(double *S, double dz,double *coef) {
+   double k1[4], k2[4], k3[4], k4[4];
+   double temp[4];
+   int i;
+
+   dS_dz(S, k1, coef);
+
+   for (i = 0; i < 4; i++) temp[i] = S[i] + dz*0.5 * k1[i];
+   dS_dz(temp, k2, coef);
+
+   for (i = 0; i < 4; i++) temp[i] = S[i] + dz*0.5 * k2[i];
+   dS_dz(temp, k3, coef);
+
+   for (i = 0; i < 4; i++) temp[i] = S[i] + dz * k3[i];
+   dS_dz(temp, k4, coef);
+
+   for (i = 0; i < 4; i++) 
+      S[i] += (dz/6.0) * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+}
+
+
+
+void transversePush(Domain *D,int iteration)
+{
+  switch(D->dimension)  {
+  case 1 :
+	  ;
+//    particlePush1D(D);
+    break;
+
+  case 2 :
+//    particlePush2D(&D,iteration);
+    break;
+  case 3 :
+    transversePush_3D(D,iteration);
+    break;
+    
+  default :
+    printf("In particlePush, what dimension(%d)?\n",D->dimension);
+  }
+
+}
+
+
+void push_theta_gamma(Domain *D,int iteration)
+{
+  switch(D->dimension)  {
+  case 1 :
+    push_theta_gamma_1D(D,iteration);
+    break;
+
+  case 2 :
+//    particlePush2D(&D,iteration);
+    break;
+  case 3 :
+    push_theta_gamma_3D(D,iteration);
+    break;
+    
+  default :
+    printf("In particlePush, what dimension(%d)?\n",D->dimension);
+  }
+
+}
+
+void drift_theta_gamma(Domain *D,int iteration)
+{
+   int startI,endI,minI,maxI,sliceI,s,numInBeamlet,n;
+   LoadList *LL;
+   double dz,ks,px,py,invGam,invGam0,wakeE,tmp,invBeta0;
+   ptclList *p;
+
+   int myrank;
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+   dz=D->dz;    ks=D->ks;
+
+   startI=1;       endI=D->subSliceN+1;
+   minI=D->minI;   maxI=D->maxI;
+
+   invGam0=1.0/D->gamma0;
+   invBeta0=1.0/sqrt(1-invGam0*invGam0);
+
+   if(myrank==0) printf("iteration=%d, driftFlag=%d, drift ON, K0=%g\n",iteration,D->driftFlag,D->K0);
+
+   LL=D->loadList;
+   s=0;
+   while(LL->next) {
+      numInBeamlet=LL->numInBeamlet;
+      for(sliceI=startI; sliceI<endI; sliceI++)
+      {
+         if(D->wakeONOFF==ON) wakeE=D->wakeE[sliceI-startI+minI]/mc2*1e-6;
+         else                 wakeE=0.0;
+
+         p=D->particle[sliceI].head[s]->pt;
+         while(p) {
+            for(n=0; n<numInBeamlet; n++) {
+               px=p->px[n];  py=p->py[n];  invGam=1.0/p->gamma[n];
+               tmp=ks*0.5*dz*invBeta0*(invGam0*invGam0-invGam*invGam*(1+px*px+py*py));
+               p->theta[n]-=tmp;
+               p->gamma[n]-=wakeE*dz;
+            }
+            p=p->next;
+         }   //Enf of while(p)			
+      }     //End of for(sliceI)
+		
+      LL=LL->next;
+      s++;
+   }
+}
+
+
+void transversePush_3D(Domain *D,int iteration)
+{
+   int i,j,m,s,sliceI,startI,endI,n,numInBeamlet;
+   LoadList *LL;
+   double ue,dz,gam,ku,x,y,px,py,K0,x0,y0,px0,py0;
+   double coefList[5]={0,0,0.5,0.5,1};
+   double k_xL[5]={0,0,0,0,0};
+   double k_yL[5]={0,0,0,0,0};
+   double k_pxL[5]={0,0,0,0,0};
+   double k_pyL[5]={0,0,0,0,0};
+   ptclList *p;
+
+   int myrank, nTasks;
+   MPI_Status status;
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks);
+
+   dz=D->dz*0.5;
+   ku=D->ku;
+   K0=D->K0;
+   ue=D->ue;
+   startI=1;  endI=D->subSliceN+1;
+   double aa=D->K0*D->K0*0.25*ue*D->ku;
+   double bb=D->K0*D->K0*0.25*(1+ue*ue)*D->ku*D->ku;
+   double cc=eCharge*D->g/eMass/velocityC;
+   double dd,xCoef=0.0,yCoef=0.0;
+   int K0_alpha=D->K0_alpha;
+
+   if (D->undType==Normal) {
+      if (D->K0_alpha==1) {
+         xCoef=1;
+         yCoef=0;
+      } else if (D->K0_alpha==-1) {
+         xCoef=0;
+         yCoef=1;
+      } 
+   } else if (D->undType==AppleX) {
+      xCoef=1;
+      yCoef=1;
+   } else {
+      if(myrank==0) printf("No undulator_mode!!\n"); else;
+      exit(0);
+   }
+
+
+   LL=D->loadList;
+   s=0;
+   while(LL->next) {
+      numInBeamlet=LL->numInBeamlet;
+
+      for(sliceI=startI; sliceI<endI; sliceI++)
+      {    
+         p=D->particle[sliceI].head[s]->pt;
+         while(p) {
+            for(n=0; n<numInBeamlet; n++) {
+               gam=p->gamma[n];
+               x0=p->x[n];  y0=p->y[n];
+               px0=p->px[n]; py0=p->py[n];
+               dd=ku*K0*K0/(4*gam*gam)*ue;
+
+               for(m=1; m<5; m++) {
+                  x=x0 + dz*k_xL[m-1]*coefList[m];
+                  y=y0 + dz*k_yL[m-1]*coefList[m];
+                  px=px0 + dz*k_pxL[m-1]*coefList[m];
+                  py=py0 + dz*k_pyL[m-1]*coefList[m];
+
+                  k_xL[m]=px/gam-aa*(K0_alpha*x+y)/(gam*gam);
+                  k_yL[m]=py/gam+aa*(K0_alpha*x-y)/(gam*gam);
+                  k_pxL[m]=K0_alpha*(px-py)*dd-(bb/gam*xCoef+cc)*x;
+                  k_pyL[m]=K0_alpha*(px+py)*dd-(bb/gam*yCoef-cc)*y;
+               }
+
+               p->x[n]+=dz/6.0*(k_xL[1]+2*k_xL[2]+2*k_xL[3]+k_xL[4]);
+               p->y[n]+=dz/6.0*(k_yL[1]+2*k_yL[2]+2*k_yL[3]+k_yL[4]);
+               p->px[n]+=dz/6.0*(k_pxL[1]+2*k_pxL[2]+2*k_pxL[3]+k_pxL[4]);
+               p->py[n]+=dz/6.0*(k_pyL[1]+2*k_pyL[2]+2*k_pyL[3]+k_pyL[4]);
+
+            }
+            p=p->next;
+         }
+      }		//End of for(sliceI)
+      LL=LL->next;
+      s++;
+   }
+}
+
+void push_theta_gamma_3D(Domain *D,int iteration)
+{
+   int i,j,N,m,ii,jj,s,h,H,numHarmony,nx,ny,order,ll,L,f,F;
+   int startI,endI,minI,maxI,sliceI,indexJ,idx,n,numInBeamlet;
+   LoadList *LL;
+   double complex Ux[D->numHarmony],Uy[D->numHarmony],Em[D->SCLmode];
+   double dz,dx,dy,ku,ks,K0,K,xi,xi2,e_mc2,r,dr,dBessel;
+   double x0,y0,px,py,pr2,r2,gam0,gam,th,th0,invGam,minX,minY,wakeE;
+   double J1,J2,J3,wr[2],wx[2],wy[2],w[2],sumTh,sumG,sumEzPart;
+   double tmp,dPhi,coefList[5]={0,0,0.5,0.5,1},k_th[5]={0,0,0,0,0},k_gam[5]={0,0,0,0,0};	 
+   double B,sumU2;
+   double complex fx,fy,compTmp,expP,expM,tmpComp;
+   ptclList *p;
+
+   int myrank;
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+   dz=D->dz;    K0=D->K0;
+   ku=D->ku;    ks=D->ks;
+   numHarmony=D->numHarmony;
+   dx=D->dx; dy=D->dy; dr=D->dr;
+   nx=D->nx; ny=D->ny;
+   dBessel = D->dBessel;
+   minX=D->minX;  minY=D->minY;
+   dPhi=2*M_PI*D->numSlice;
+   e_mc2 = eCharge/eMass/velocityC/velocityC;	 
+
+   double ue=D->ue;
+   double psi_chi=atan(2*ue/(1-ue*ue));
+   if(ue==1) psi_chi=M_PI*0.5; else ;
+   int K0_alpha=D->K0_alpha;
+   double K2=(1+ue*ue)*K0*K0*0.5;
+   double complex etaX, etaY;
+   if(K0_alpha==1) {
+      etaX=cos(psi_chi*0.5);
+      etaY=I*sin(psi_chi*0.5);
+   } else if(K0_alpha==-1) {
+      etaX=I*sin(psi_chi*0.5);
+      etaY=cos(psi_chi*0.5);
+   } else {
+      if(myrank==0) printf("K0_alpha=%d\n",K0_alpha); else ;
+      exit(0);
+   }
+    
+   L = D->SCLmode; F = D->SCFmode;	 
+   startI=1;       endI=D->subSliceN+1;
+   minI=D->minI;   maxI=D->maxI;
+   N=D->nx*D->ny;
+
+   LL=D->loadList;
+   s=0;
+   while(LL->next) {
+      numInBeamlet=LL->numInBeamlet; 
+      for(sliceI=startI; sliceI<endI; sliceI++)
+      {
+         if(D->wakeONOFF==ON) wakeE=D->wakeE[sliceI-startI+minI]/mc2*1e-6;
+         else                 wakeE=0.0;      
+
+         p=D->particle[sliceI].head[s]->pt;
+         while(p) {
+            for(n=0; n<numInBeamlet; n++) {
+               x0=p->x[n];   y0=p->y[n];
+               th0=p->theta[n]; gam0=p->gamma[n];
+               r2= x0*x0 + y0*y0;
+               px=p->px[n]; py=p->py[n];
+               pr2= px*px + py*py;
+    	       //K2=(1+ue)*K0*K0*0.5*(1.0+ku*ku*0.5*r2);
+               
+               B=atan(ue*(px-py)/(px+ue*ue*py));
+               expP=cexp(I*(B-psi_chi*0.5));
+               expM=conj(expP);
+               xi=ks/ku*K0*K0/(8.0*gam0*gam0)*(1-ue*ue);
+               xi2=ks/ku*K0*sqrt(((1+K0_alpha)*(px*px+ue*ue*py*py)+(1-K0_alpha)*(px*px*ue*ue+py*py))*0.5)/(gam*gam);
+
+    	       i=(int)((x0-minX)/dx);
+	       j=(int)((y0-minY)/dy);
+	       if(i>=0 && i<nx-1 && j>=0 && j<ny-1)  {
+                  r=sqrt(r2);
+                  indexJ = (int)(r/dr);
+                  wr[1]=(r/dr-indexJ); wr[0]=1.0-wr[1];
+                  if(indexJ+1<D->nr) {
+                     for(ll=0; ll<L; ll++) {
+  		        Em[ll]=0.0+I*0.0;
+                        for(f=0; f<F; f++) 
+                           for(jj=0; jj<2; jj++) 
+		              Em[ll]+=D->Ez[sliceI][indexJ+jj][ll][f]*wr[jj];
+                     }
+		  }       	   
+                  wx[1]=(x0-minX)/dx-i; wx[0]=1.0-wx[1];
+                  wy[1]=(y0-minY)/dy-j; wy[0]=1.0-wy[1];
+                  for(h=0; h<numHarmony; h++)  {				
+                     Ux[h]=0.0+I*0.0;
+                     Uy[h]=0.0+I*0.0;
+                     for(ii=0; ii<2; ii++) 
+                        for(jj=0; jj<2; jj++)  {
+      			   Ux[h]+=D->Ux[h][sliceI][(j+jj)*nx+(i+ii)]*wx[ii]*wy[jj];
+      			   Uy[h]+=D->Uy[h][sliceI][(j+jj)*nx+(i+ii)]*wx[ii]*wy[jj];
+                        }
+                  }
+                  sumU2=0.0;
+                  for(h=0; h<numHarmony; h++)  {
+                     H = D->harmony[h];
+                     sumU2+=(cabs(Ux[h])*cabs(Ux[h])+cabs(Uy[h])*cabs(Uy[h]))/(2.0*H*H);
+                  }
+                 
+                  k_th[0]=0; 
+                  k_gam[0]=0; 
+                  for(m=1; m<5; m++) {
+                     th=th0 + dz*k_th[m-1]*coefList[m]; 
+                     gam=gam0 + dz*k_gam[m-1]*coefList[m];
+                     sumTh=sumG=0.0;
+                     for(h=0; h<numHarmony; h++)  {
+                        H = D->harmony[h];
+                        idx=(int)(H*xi/dBessel);
+                        w[1]=(H*xi/dBessel)-idx; w[0]=1.0-w[1];
+                        if(H%2==1)  {  //odd harmony
+                           tmp=pow(-1.0,(H-1)*0.5);
+                           order=(H-1)*0.5;
+                           J1=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                           order=(H+1)*0.5;
+                           J2=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                           fx=tmp*(K0_alpha*J1-J2);
+                           fy=tmp*(K0_alpha*J1+J2);
+                        } else {    //even harmony
+                           tmp=pow(-1.0,H*0.5);
+                           order=(H-2)*0.5;
+                           J1=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                           order=H*0.5;
+                           J2=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                           order=(H+2)*0.5;
+                           J3=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                           fx=tmp*H*xi2*0.5*(expP*(K0_alpha*J1-J2)+expM*(K0_alpha*J2-J3));
+                           fy=tmp*H*xi2*0.5*(expP*(K0_alpha*J1+J2)+expM*(K0_alpha*J2+J3));
+                        }
+                        tmpComp=cexp(I*H*(th+psi_chi*0.5))*(etaX*fx*Ux[h]-etaY*fy*Uy[h]);
+                        sumTh+=creal(I*tmpComp+conj(I*tmpComp))/(2.0*H);
+                        sumG+=creal(tmpComp+conj(tmpComp))/(4.0*gam);
+                     }  //End of harmonics
+
+                     sumEzPart = 0.0;
+                     for(ll=0; ll<L; ll++)  {
+                        tmp=creal(Em[ll]*cexp(I*(ll+1)*th));
+	                sumEzPart += 2.0*tmp;
+   	             }
+                     k_th[m]=ku-ks/(2*gam*gam)*(1+pr2+K2+sumU2+K0*sqrt(ue*ue+1)*sumTh);
+                     k_gam[m]=ks*K0*sqrt(ue*ue+1)*sumG + e_mc2*sumEzPart;
+                  }   //End of Runge-Kutta
+                  tmp=dz/6.0*(k_th[1] + 2*k_th[2] + 2*k_th[3] + k_th[4]);
+                  if(tmp>dPhi || tmp<-dPhi || tmp>dPhi*10 || tmp<-10*dPhi) {
+                     printf("myrank=%d,iteration=%d,dTheta=%g,sumEzPart=%g,i=%d,j=%d,Ux[%d]=%g+I%g,k_th[1]=%g,k_th[2]=%g,k_th[3]=%g,k_th[4]=%g,tmp=%g\n",myrank,iteration,dPhi,sumEzPart,i,j,0,creal(Ux[0]),cimag(Ux[0]),k_th[1],k_th[2],k_th[3],k_th[4],tmp);
+                     exit(0);
+                  } else;
+                  p->theta[n]+=tmp; 
+                  p->gamma[n]+=dz/6.0*(k_gam[1]+2*k_gam[2]+2*k_gam[3]+k_gam[4])-dz*wakeE; 
+               }   //End of for(i,j)
+            }        // End of for(numSlice)
+
+            p=p->next;               
+         }       //End of while(p)
+      }     //Enf of for(sliceI)     
+      LL=LL->next;
+      s++;
+   }           //End of while(LL)
+}
+
+
+void push_theta_gamma_1D(Domain *D,int iteration)
+{
+   int N,m,s,h,H,numHarmony,nx,ny,order,ll,L,f,F;
+   int startI,endI,minI,maxI,sliceI,indexJ,idx,n,numInBeamlet;
+   LoadList *LL;
+   double complex Ux[D->numHarmony],Uy[D->numHarmony],Em[D->SCLmode];
+   double dz,dx,dy,ku,ks,K0,K,xi,xi2,e_mc2,r,dr,dBessel;
+   double x0,y0,px,py,pr2,r2,gam0,gam,th,th0,invGam,minX,minY,wakeE;
+   double J1,J2,J3,wr[2],wx[2],wy[2],w[2],sumTh,sumG,sumEzPart;
+   double tmp,dPhi,coefList[5]={0,0,0.5,0.5,1},k_th[5]={0,0,0,0,0},k_gam[5]={0,0,0,0,0};	 
+   double B,sumU2;
+   double complex fx,fy,compTmp,expP,expM,tmpComp;
+   ptclList *p;
+
+   int myrank;
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+   dz=D->dz;    K0=D->K0;
+   ku=D->ku;    ks=D->ks;
+   numHarmony=D->numHarmony;
+   dBessel = D->dBessel;
+   minX=D->minX;  minY=D->minY;
+   dPhi=2*M_PI*D->numSlice;
+   e_mc2 = eCharge/eMass/velocityC/velocityC;	 
+
+   double ue=D->ue;
+   double psi_chi=atan(2*ue/(1-ue*ue));
+   if(ue==1) psi_chi=M_PI*0.5; else ;
+   int K0_alpha=D->K0_alpha;
+   double K2=(1+ue*ue)*K0*K0*0.5;
+   double complex etaX, etaY;
+   if(K0_alpha==1) {
+      etaX=cos(psi_chi*0.5);
+      etaY=I*sin(psi_chi*0.5);
+   } else if(K0_alpha==-1) {
+      etaX=I*sin(psi_chi*0.5);
+      etaY=cos(psi_chi*0.5);
+   } else {
+      if(myrank==0) printf("K0_alpha=%d\n",K0_alpha); else ;
+      exit(0);
+   }
+    
+   L = D->SCLmode; F = D->SCFmode;	 
+   startI=1;       endI=D->subSliceN+1;
+   minI=D->minI;   maxI=D->maxI;
+   N=D->nx*D->ny;
+
+   LL=D->loadList;
+   s=0;
+   while(LL->next) {
+      numInBeamlet=LL->numInBeamlet; 
+      for(sliceI=startI; sliceI<endI; sliceI++)
+      {
+         if(D->wakeONOFF==ON) wakeE=D->wakeE[sliceI-startI+minI]/mc2*1e-6;
+         else                wakeE=0.0;      
+
+         p=D->particle[sliceI].head[s]->pt;
+         while(p) {
+            for(n=0; n<numInBeamlet; n++) {
+               th0=p->theta[n]; gam0=p->gamma[n];
+               xi=ks/ku*K0*K0/(8.0*gam0*gam0)*(1-ue*ue);
+
+               for(ll=0; ll<L; ll++) 
+                  for(f=0; f<F; f++) 
+	             Em[ll]=D->Ez[sliceI][0][ll][f];
+                      	   
+               for(h=0; h<numHarmony; h++)  {				
+                  Ux[h]=D->Ux[h][sliceI][0];
+                  Uy[h]=D->Uy[h][sliceI][0];
+               }
+               sumU2=0.0;
+               for(h=0; h<numHarmony; h++)  {
+                  H = D->harmony[h];
+                  sumU2+=(cabs(Ux[h])*cabs(Ux[h])+cabs(Uy[h])*cabs(Uy[h]))/(2.0*H*H);
+               }
+                 
+               k_th[0]=0; 
+               k_gam[0]=0; 
+               for(m=1; m<5; m++) {
+                  th=th0 + dz*k_th[m-1]*coefList[m]; 
+                  gam=gam0 + dz*k_gam[m-1]*coefList[m];
+                  sumTh=sumG=0.0;
+                  for(h=0; h<numHarmony; h++)  {
+                     H = D->harmony[h];
+                     idx=(int)(H*xi/dBessel);
+                     w[1]=(H*xi/dBessel)-idx; w[0]=1.0-w[1];
+                     if(H%2==1)  {  //odd harmony
+                        tmp=pow(-1.0,(H-1)*0.5);
+                        order=(H-1)*0.5;
+                        J1=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                        order=(H+1)*0.5;
+                        J2=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                        fx=tmp*(K0_alpha*J1-J2);
+                        fy=tmp*(K0_alpha*J1+J2);
+                     } else {    //even harmony
+                        fx=0.0+I*0.0;
+                        fy=0.0+I*0.0;
+                     }
+                     tmpComp=cexp(I*H*(th+psi_chi*0.5))*(etaX*fx*Ux[h]-etaY*fy*Uy[h]);
+                     sumTh+=creal(I*tmpComp+conj(I*tmpComp))/(2.0*H);
+                     sumG+=creal(tmpComp+conj(tmpComp))/(4.0*gam);
+                  }  //End of harmonics
+
+                  sumEzPart = 0.0;
+                  for(ll=0; ll<L; ll++)  {
+                     tmp=creal(Em[ll]*cexp(I*(ll+1)*th));
+	             sumEzPart += 2.0*tmp;
+   	          }
+                  k_th[m]=ku-ks/(2*gam*gam)*(1+K2+sumU2+K0*sqrt(ue*ue+1)*sumTh);
+                  k_gam[m]=ks*K0*sqrt(ue*ue+1)*sumG + e_mc2*sumEzPart;
+               }   //End of Runge-Kutta
+               tmp=dz/6.0*(k_th[1] + 2*k_th[2] + 2*k_th[3] + k_th[4]);                 
+               if(tmp>dPhi || tmp<=-dPhi) {
+                  printf("myrank=%d,iteration=%d,th0=%g,dTheta=%g,sumEzPart=%g,Ux[%d]=%g+I%g,k_th[1]=%g,k_th[2]=%g,k_th[3]=%g,k_th[4]=%g\n",myrank,iteration,th0,dPhi,sumEzPart,h,creal(Ux[h]),cimag(Ux[h]),k_th[1],k_th[2],k_th[3],k_th[4]);
+                  exit(0);
+               } else;
+               p->theta[n]+=tmp; 
+               p->gamma[n]+=dz/6.0*(k_gam[1]+2*k_gam[2]+2*k_gam[3]+k_gam[4])-dz*wakeE; 
+            }        // End of for(numSlice)
+
+            p=p->next;               
+         }       //End of while(p)
+      }     //Enf of for(sliceI)     
+      LL=LL->next;
+      s++;
+   }           //End of while(LL)
+}
+
+
+
+
+
+
+/*
+void push_theta_gamma_1D(Domain *D,int iteration)
+{
+   int numHarmony,order,startI,endI,minI,maxI;
+   int n,i,s,h,H,ll,L,idx,intThe,bn,m,numInBeamlet;	
+   LoadList *LL;
+   double complex Ux[D->numHarmony],Uy[D->numHarmony],Em[D->SCLmode],compVal;
+   double dz,ku,ks,K0,K,xi,e_mc2,dBessel,w[2];
+   double z,gamma,theta,invGam,invBeta,tmp,dPhi,sumGam,sumTh,sumEzPart,prevThe;
+	double coef,lkCoef,JJ,J1,J2,wakeE,kList[5],lList[5];
+   ptclList *p;
+   int myrank;
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+   L = D->SCLmode;
+   startI=1;       endI=D->subSliceN+1;
+   minI=D->minI;   maxI=D->maxI;
+	dz = D->dz;     K0=D->K0;
+   ku=D->ku;       ks=D->ks;
+   numHarmony = D->numHarmony;
+   dBessel = D->dBessel;
+   dPhi=2*M_PI*D->numSlice;
+   e_mc2 = eCharge/eMass/velocityC/velocityC;	 
+	bn=D->bn;
+
+   LL=D->loadList;
+   s=0;
+   while(LL->next) {
+      numInBeamlet=LL->numInBeamlet;
+
+      for(i=startI; i<endI; i++)
+      {
+         if(D->wakeONOFF==ON) wakeE=D->wakeE[i-startI+minI]/mc2*1e-6;
+         else                wakeE=0.0;      
+
+         for(ll=0; ll<L; ll++) Em[ll]=D->Ez[i][0][ll][0];
+         for(h=0; h<numHarmony; h++) {
+            Ux[h]=D->Ux[h][i][0];
+            Uy[h]=D->Uy[h][i][0];
+         }
+
+         K=K0;
+         p=D->particle[i].head[s]->pt;
+         while(p) {
+            for(n=0; n<numInBeamlet; n++) {
+	            kList[0]=0.0;
+		         lList[0]=0.0;
+               for(m=1; m<5; m++) {
+                  lkCoef=((int)(m*0.5))*0.5;
+	               theta=p->theta[n] + lkCoef*kList[m-1]*dz;
+	               gamma=p->gamma[n] + lkCoef*lList[m-1]*dz; invGam=1.0/gamma;
+	               invBeta = 1.0-(1.0 + K*K*0.5)*0.5*invGam*invGam;
+	               invBeta = 1.0/invBeta;
+	               sumTh=sumGam=0.0;
+	               //xi=ks/ku*0.25*K*K*invGam*invGam;
+	               xi=K*K*0.25/(1+K*K*0.5);          
+			         for(h=0; h<numHarmony; h++)  {
+                     H = D->harmony[h];
+                     if(H%2==1) {
+                        coef=pow(-1.0,(H-1)*0.5);
+                        idx=(int)(H*xi/dBessel);
+                        if(idx>bn-1) { printf("idx=%d\n",idx); idx=bn-2; }
+                        w[1]=(H*xi/dBessel)-idx; w[0]=1.0-w[1];
+                        order=(H-1)*0.5;
+                        J1=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                        order=(H+1)*0.5;
+                        J2=D->BesselJ[idx][order]*w[0]+D->BesselJ[idx+1][order]*w[1];
+                        JJ=coef*(J1-J2);
+	                  } else JJ=0.0;
+                     compVal=Ux[h]*cexp(I*H*theta);
+                     sumTh -=2*JJ*K/sqrt(2.0)*cimag(compVal);
+		     sumGam-=2*JJ*K/sqrt(2.0)*creal(compVal);
+                  }
+                  sumEzPart = 0.0;
+                  for(ll=0; ll<L; ll++)  {
+                     tmp=creal(Em[ll]*cexp(I*(ll+1)*theta));
+                     sumEzPart += 2.0*tmp;
+                  }
+                  kList[m]=dz*(ku-ks*(1.0+K*K*0.5+sumTh)*0.5*invGam*invGam)*invBeta;
+						lList[m]=dz*(ks*sumGam/2.0*invGam*invBeta + e_mc2*sumEzPart);
+			      }  //End of for(m)
+
+               tmp=dz/6.0*(kList[1]+2*kList[2]+2*kList[3]+kList[4]);
+               if(tmp>dPhi || tmp<-dPhi) {
+                  printf("iteration=%d, dTheta=%g, sumEzPart=%g, Ux[0]=%g\n",iteration,tmp,sumEzPart,cabs(D->Ux[0][i][0]));  //lala
+                  exit(0);
+               } else ;
+               p->theta[n]+=tmp;
+               p->gamma[n]+=dz/6.0*(lList[1]+2*lList[2]+2*lList[3]+lList[4]) - wakeE*dz;
+		      }
+	         p=p->next;
+         }    //End of while9p)
+      }		//End of for(i)
+		LL=LL->next;
+		s++;
+   }
+}
+*/
+//lala
+/*	
+void push_theta_gamma_1D(Domain *D,int iteration)
+{
+    int i,s,h,harmony,order,startI,endI,minI,maxI;
+    LoadList *LL;
+    double complex U[D->harmony],Ez[D->harmony],compValU,compValEz,expITh,expIhTh;
+    double dz,ku,ks,K0,K,xi,ar[D->harmony],psi[D->harmony];
+    double z,gamma,theta,invGam,invBeta,tmp,w,dPhi;
+    double coef,JJ[D->harmony],J1,J2,sumTh,sumGam,wakeE;
+    double k1,k2,k3,k4,l1,l2,l3,l4,totalEz;
+    ptclList *p;
+
+    startI=1;       endI=D->subSliceN+1;
+    minI=D->minI;   maxI=D->maxI;
+    dz=D->dz;
+    ku=D->ku;
+    ks=D->ks;
+    K0=D->K0;
+    harmony=D->harmony;
+    dPhi=2*M_PI*D->numSlice;
+
+    for(i=startI; i<endI; i++)
+    {
+      for(h=0; h<harmony; h++) { 
+        ar[h]=cabs(D->U[h][i][0]);
+        psi[h]=carg(I*D->U[h][i][0]);
+        Ez[h]=D->Ez[h][i][0];
+      }
+      if(D->wakeONOFF=ON) wakeE=D->wakeE[i-startI+minI]/mc2*1e-6;
+      else                wakeE=0.0;      
+
+      for(s=0; s<D->nSpecies; s++)  {
+        p=D->particle[i].head[s]->pt;
+        while(p) {
+          K=K0;
+	  xi=K*K*0.5/(1+K*K);
+
+          for(h=1; h<=harmony; h++)  {
+            if(h%2==1)  {  //odd harmony
+              coef=pow(-1.0,(h-1)/2);
+              order=(h-1)/2;
+              J1=gsl_sf_bessel_Jn(order,h*xi);
+              order=(h+1)/2;
+              J2=gsl_sf_bessel_Jn(order,h*xi);
+              JJ[h-1]=coef*(J1-J2);
+            } else {
+              JJ[h-1]=0.0;
+            }
+          }
+
+	  theta=p->theta;
+	  gamma=p->gamma; invGam=1.0/gamma;
+//	  invBeta=1.0+(1+K*K)*0.5*invGam*invGam;
+	  invBeta=1.0+(1+K*K+K*JJ[0]*2*ar[0]*cos(theta+psi[0]))*0.5*invGam*invGam;
+          compValEz=0.0+I*0.0;
+          for(h=1; h<=harmony; h++)  {
+	    expIhTh=cexp(I*h*theta);
+            compValEz+=Ez[h-1]*expIhTh;
+	  }
+	  totalEz=eCharge/eMass/velocityC/velocityC*2*creal(compValEz)-wakeE;	  
+          k1=ku+ks*(1.0-invBeta);
+	  l1=-ks*JJ[0]*K*ar[0]*invBeta*invGam*sin(theta+psi[0])+totalEz;
+
+	  theta=p->theta+0.5*dz*k1;
+	  gamma=p->gamma+0.5*dz*l1; invGam=1.0/gamma;
+//	  invBeta=1.0+(1+K*K)*0.5*invGam*invGam;
+	  invBeta=1.0+(1+K*K+K*JJ[0]*ar[0]*2*cos(theta+psi[0]))*0.5*invGam*invGam;
+          compValEz=0.0+I*0.0;
+          for(h=1; h<=harmony; h++)  {
+	    expIhTh=cexp(I*h*theta);
+            compValEz+=Ez[h-1]*expIhTh;
+	  }
+	  totalEz=eCharge/eMass/velocityC/velocityC*2*creal(compValEz)-wakeE;
+          k2=ku+ks*(1.0-invBeta);
+	  l2=-ks*JJ[0]*K*ar[0]*invBeta*invGam*sin(theta+psi[0])+totalEz;
+
+	  theta=p->theta+0.5*dz*k2;
+	  gamma=p->gamma+0.5*dz*l2; invGam=1.0/gamma;
+//	  invBeta=1.0+(1+K*K)*0.5*invGam*invGam;
+	  invBeta=1.0+(1+K*K+K*JJ[0]*ar[0]*2*cos(theta+psi[0]))*0.5*invGam*invGam;
+          compValEz=0.0+I*0.0;
+          for(h=1; h<=harmony; h++)  {
+	    expIhTh=cexp(I*h*theta);
+            compValEz+=Ez[h-1]*expIhTh;
+	  }
+	  totalEz=eCharge/eMass/velocityC/velocityC*2*creal(compValEz)-wakeE;
+          k3=ku+ks*(1.0-invBeta);
+	  l3=-ks*JJ[0]*K*ar[0]*invBeta*invGam*sin(theta+psi[0])+totalEz;
+
+	  theta=p->theta+dz*k3;
+	  gamma=p->gamma+dz*l3; invGam=1.0/gamma;
+//	  invBeta=1.0+(1+K*K)*0.5*invGam*invGam;
+	  invBeta=1.0+(1+K*K+K*JJ[0]*ar[0]*2*cos(theta+psi[0]))*0.5*invGam*invGam;
+          compValEz=0.0+I*0.0;
+          for(h=1; h<=harmony; h++)  {
+	    expIhTh=cexp(I*h*theta);
+            compValEz+=Ez[h-1]*expIhTh;
+	  }
+	  totalEz=eCharge/eMass/velocityC/velocityC*2*creal(compValEz)-wakeE;
+          k4=ku+ks*(1.0-invBeta);
+	  l4=-ks*JJ[0]*K*ar[0]*invBeta*invGam*sin(theta+psi[0])+totalEz;
+
+          tmp=dz*1.0/6.0*(k1+2*k2+2*k3+k4);
+	  if(tmp>dPhi || tmp<-1.0*dPhi) {
+		  printf("tmp=%g,dPhi=%g\n",tmp,dPhi);
+	  } else ;
+          p->theta+=tmp;
+          p->gamma+=dz*1.0/6.0*(l1+2*l2+2*l3+l4);
+
+//          // energy loss by wake field
+//          delGam=D->wakeE[i-startI+minI]/mc2;	  
+//          p->gamma-=delGam*dz;
+
+          tmp=p->theta/dPhi;
+	  w=tmp-(int)tmp;
+	  p->theta=w*dPhi;
+          if(p->theta>dPhi)   p->theta=p->theta-dPhi;
+          else if(p->theta<0) p->theta=dPhi+p->theta;
+	  
+
+	  p=p->next;
+        }
+      }		//End of for(s)
+    }		//End of for(i)
+}
+*/
+
+double Runge_Kutta_gamma(double complex *Ux,double theta,double harmony,double ks,double K,double xi,double gamma,double invBeta0,double dz)
+{
+  double sum,sinX,cosX,coef,J1,J2,JJ,k1,k2,k3,k4;
+  double complex compVal;
+  int h,order;
+
+  sum=0.0;
+  sinX=sin(theta); cosX=cos(theta);
+  for(h=1; h<=harmony; h++)  {
+    if(h%2==1)  {  //odd harmony
+      coef=pow(-1.0,h-1);
+      order=(h-1)/2;
+      J1=gsl_sf_bessel_Jn(order,h*xi);
+      order=(h+1)/2;
+      J2=gsl_sf_bessel_Jn(order,h*xi);
+      JJ=coef*(J1-J2);
+      compVal=Ux[h-1]*cexp(-I*theta);
+      sum=JJ*2*creal(compVal)*h;
+    } else {
+      JJ=0.0;
+      compVal=Ux[h-1]*cexp(-I*theta);
+      sum=JJ*2*creal(compVal)*h;
+    }
+  }
+
+  k1=-1.0*K*sqrt(2.0)*ks*invBeta0*sum/(gamma);
+  
+  k2=-1.0*K*sqrt(2.0)*ks*invBeta0*sum/(gamma+0.5*k1);
+  
+  k3=-1.0*K*sqrt(2.0)*ks*invBeta0*sum/(gamma+0.5*k2);
+  
+  k4=-1.0*K*sqrt(2.0)*ks*invBeta0*sum/(gamma+k3);
+
+  return (k1/6.0+k2/3.0+k3/3.0+k4/6.0)*dz;
+}
+
+void phaseShift(Domain *D,int iteration)
+{
+   int n,s,i,sliceI,startI,endI,numInBeamlet;
+   double shiftValue,theta;
+   LoadList *LL;
+   ptclList *p;
+   PhaseShifter *PS;
+   int myrank, nTasks;
+   MPI_Status status;
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks); 
+
+   startI=1;       endI=D->subSliceN+1;
+
+   PS=D->psList;
+   while(PS->next) {
+      for(i=0; i<PS->num; i++) {
+         if(iteration==PS->step[i]) {
+            shiftValue=PS->phase;
+            if(myrank==0) printf("phase shift with %g is done at step%d.\n",shiftValue,iteration);  else ;
+
+            LL=D->loadList;
+            s=0;
+            while(LL->next) {
+               numInBeamlet=LL->numInBeamlet;
+        
+               for(sliceI=startI; sliceI<endI; sliceI++)  {
+                  p=D->particle[sliceI].head[s]->pt;
+                  while(p) {
+                     for(n=0; n<numInBeamlet; n++) p->theta[n]-=shiftValue;
+                     p=p->next;
+                  }
+               }		//End of for(sliceI)
+
+               LL=LL->next;
+               s++;
+            }
+         } else ;
+      }
+      PS=PS->next;
+   }
+
+}
+
