@@ -178,6 +178,8 @@ void parameterSetting(Domain *D,char *input)
    UL = D->undList;
    D->K0=UL->K0[0];
    D->ue=UL->ue;
+   D->K0_alpha=UL->alpha;
+   D->undType=UL->undType;
    D->lambdaU=UL->lambdaU;	
    D->ku=2.0*M_PI/D->lambdaU;
 

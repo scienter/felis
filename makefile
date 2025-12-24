@@ -1,5 +1,5 @@
 EXEC = show
-CC = mpicc
+CC = /opt/ompi/5.0.6/bin/mpicc
 #CC = h5pcc
 OBJS = main.o parameterSetting.o findparam.o boundary.o clean.o loadBeam.o saveParticleHDF.o saveFieldHDF.o updateK_quadG.o particlePush.o solveField.o rearrangeParticles.o fieldShareZ.o updateTotalEnergy.o loadSeed.o twiss.o wakeField.o chicane.o selfseed.o saveFile.o restoreDumpHDF.o
 

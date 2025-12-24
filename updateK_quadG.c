@@ -8,8 +8,8 @@
 // For now, plane undulator is applied.
 void updateK_quadG(Domain *D,int iteration,double half)
 {
-   int n,exist,airPosition;
-   double z,K0,g,dz,q0,q1,x0,x1,lambdaU;
+   int n,exist,airPosition,inUnd,inInter,undType,K0_alpha;
+   double z,g,dz,q0,q1,x0,x1,K0,ue,lambdaU;
    UndulatorList *UL;
    QuadList *QD;
    int myrank, nTasks;
@@ -26,40 +26,49 @@ void updateK_quadG(Domain *D,int iteration,double half)
    int where=0;
 
    airPosition=OFF;
-   lambdaU=0.0;
+   K0=D->K0;
+   ue=D->ue;
+   K0_alpha=D->K0_alpha;
+   undType=D->undType;
    D->currentFlag=OFF;
-   D->K0=0.0;
-   D->ue=0.0;
-   D->K0_alpha=1;
-   D->undType=Normal;
+   lambdaU=D->lambdaU;
+   
+   inUnd=inInter=OFF;
    while(UL->next) {
      for(n=0; n<UL->numbers; n++) {
        if(z>=UL->unitStart[n] && z<UL->unitEnd[n]) {
-          D->K0=UL->K0[n]*(1+UL->taper*(z-UL->undStart[n]));
-          D->ue=UL->ue;
-          D->K0_alpha=UL->alpha;
-          D->undType=UL->undType;
-	  lambdaU=UL->lambdaU;
-          if(z>=UL->undStart[n] && z<UL->undEnd[n]) D->currentFlag=ON;
+          if(z>=UL->undStart[n] && z<UL->undEnd[n]) {
+             inUnd=ON;
+             K0=UL->K0[n]*(1+UL->taper*(z-UL->undStart[n]));
+             ue=UL->ue;
+             K0_alpha=UL->alpha;
+             undType=UL->undType;
+	          lambdaU=UL->lambdaU;
+             D->currentFlag=ON;
+          }
           else {
-             if (UL->air==ON) airPosition=ON; else ;
+             inInter=ON;
+             if (UL->air==ON) airPosition=ON; 
           }
        } else ;
      }  // for(n)
      UL=UL->next; 
    }
 
-   if(D->K0==0.0) airPosition=ON; else ;
+   D->K0=K0;
+   D->ue=ue;
+   D->K0_alpha=K0_alpha;
+   D->lambdaU=lambdaU;
+   D->ku=2*M_PI/lambdaU;
+   D->undType=undType;
 
+   if(inUnd==OFF && inInter==OFF) airPosition=ON; else ;
+   if(inUnd==ON) D->currentFlag=ON; else ;
    if(airPosition==ON) {
-      D->lambdaU=0.0;
-      D->ku=0;
+      D->ku=0;       // for drift calculation
       D->driftFlag=ON;
       D->currentFlag=OFF;
-      //D->ue=0;
    } else {
-      D->lambdaU=lambdaU;
-      D->ku=2*M_PI/lambdaU;
       D->driftFlag=OFF;
    }
 
