@@ -22,4 +22,30 @@ While installing, you may see warning messages. Mostly it is OK if not seen in e
 
 ## Running FELIS
 
-dfd
+Basic running command is like below :
+
+mpirun -np [num cores] /home/[USER]/Git/felis/show test.inp
+
+All other simulation options are included in the input file (like 'test.inp'). A input sample is located in 'felis/input/' directory.
+
+If you are familiar with FEL simulation, the example of input file will be read easily.
+
+## Input file
+
+The input file is composed of several blocks of 'Phase_shifter', 'Save', 'Domain', 'Seed', 'Undulator', 'Wake_field', 'Chicane', 'Quad', 'EBeam'.
+
+Some of blocks can be used in multiple which are 'Phase_shifter', 'Seed', 'Undulator', 'Chicane', 'Quad', and 'EBeam'.
+
+#### Phase_shifter
+'Phase_shifter' is for the phase shifters which are located between undulators to delay electron beams compared to FEL fields.
+
+If you want multile phase shifter, 'number' will define number of phase shifters with help of 'start_position' and 'interval_length'.
+
+For example, parameters of 'number=3', 'start_position=2', 'interval_length=6' will create 3 phase shifters of
+
+#1 phase shifter : z = 2 m
+
+#2 phase shifter : z = 8 m
+
+#3 phase shifter : z = 14 m
+
