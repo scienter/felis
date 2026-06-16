@@ -8,7 +8,15 @@ Present version is the renewed one from C language code recently, so bunch compr
 
 Basic FEL formalism follows GENESIS 1.3 code, however FELIS is further extended to support elliptical polarizations. In consequence the resultant FEL field presents both of x- and y- components. 
 
-## Installation
+Please feel free contact me whenever you have questions.
+<br><br><br>
+Myunghoon Cho
+
+mh0309@postech.ac.kr
+
+2026.06.16 : Instruction version 1. 
+
+## 1. Installation
 
 You may install FELIS by simply typing 'make'.
 
@@ -20,7 +28,8 @@ All library paths will be located at the 'Specify Library paths' block in 'makef
 
 While installing, you may see warning messages. Mostly it is OK if not seen in error messages. Those 'warning' messages will be corrected soon.
 
-## Running FELIS
+<br><br>
+## 2. Running FELIS
 
 Basic running command is like below :
 
@@ -34,7 +43,7 @@ All other simulation options are included in the input file (like 'test.inp'). A
 
 If you are familiar with FEL simulation, the example of input file will be read easily.
 
-## Input file
+## 3. Input file
 
 The input file is composed of several blocks of 'Phase_shifter', 'Save', 'Domain', 'Seed', 'Undulator', 'Wake_field', 'Chicane', 'Quad', 'EBeam'.
 
@@ -171,4 +180,26 @@ Electron beam parameters will be defined.
 'number_in_beamlet' determines number of particles in a beamlet. It should be 2*(max harmony). 
 
 There are multiple nodes definition such as 'z_nodes', 'energy_nodes', 'energySpread_nodes', 'emit_nodes' as long as selecting 'load_type=Polygon'.
+
+<br><br>
+## 4. Postprocess
+
+You may find 'felis/diag' derectory, which contains 'compile', 'felField.cpp' and 'felParticle.cpp'.
+
+Compilation will be done by typing 'sh compile'. The compiled file are 'felField' and 'felParticle'. 
+
+Before compiling, change detail library path depending on your server.
+
+'felField.cpp' and 'felParticle.cpp' create text version output files based on field*.h5 and particle*.h5. And saved text output file can be plotted at 'GNUPLOT' program.
+
+After compiling, type './felField' or './felParticle', then some instruction will be shown.
+
+"felField division initial final step"
+
+"felParticle division initial final step skipCnt"
+
+'division' is for multiple steps for single calculation since normally field*.h5 and particle*.h5 are huge file. Because of memory issue, the code designed chunking access to hdf5 file. So the code does not need mpi process.
+
+'skipCnt' is for reducing number of particles in text file for same reason of memory issue.
+
 
