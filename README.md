@@ -24,7 +24,11 @@ While installing, you may see warning messages. Mostly it is OK if not seen in e
 
 Basic running command is like below :
 
-mpirun -np [num cores] /home/[USER]/Git/felis/show test.inp
+mpirun -np [num cores] /home/[USER]/Git/felis/show test.inp [dump step]
+
+'[dump_step]' is to restart simulation at specified simulation step as long as existance of 'dump_step' file such as 'field[dump_step].h5' and 'particle[dump_step].h5'.
+
+If you run without [dump_step], simulation start at '0' simulation step and no needs of any field and particle files.
 
 All other simulation options are included in the input file (like 'test.inp'). A input sample is located in 'felis/input/' directory.
 
@@ -49,3 +53,28 @@ For example, parameters of 'number=3', 'start_position=2', 'interval_length=6' w
 
 #3 phase shifter : z = 14 m
 
+'phase' defines delay in the unit of 'Pi(3.141...)'.
+
+#### Save
+'Save' is for saving save option. The saved particle and field files will be written in hdf5 format.
+
+'total_length' is the total distance to simulate, and it will define max simulation step.
+
+'save_step' define saving file interval in simulation steps.
+
+'save_start' define starting simulation step to save file.
+
+#### Domain
+'Domain' is for overal simulation boundary and grids.
+
+'nx' and 'ny' are number of grids in x and y direction (transverse plane).
+
+'photon_energy' is the targeted FEL photon energy.
+
+'num_harmony' is for total harmonics
+
+'harmony#' defines harmonis.
+
+For example, 'num_harmony=1' only needs and should be 'harmony0=1'.
+
+There is flexibility in setting harmonics
