@@ -130,6 +130,10 @@ Therefore if By direction is major, FEL major polarization lies on the x-directi
 
 'unit_start', 'unit_end', 'undulator_start', 'undulator_end' determine multiple undulator position and ranges.
 
-Considering multiple
+Considering multiple undulator units, each undulator lenght will be same as 'undulator_end'-'undulator_start'.
+
+And single undulator unit is composed of vacant area and undulator area. So vacant range will be single undulator unit - undulator length.
+
+'in_air' determines the vacant region as undulator or not. 'in_air=ON' means the region is without undulator, so there is phase slippage between FEL and electron beam. 'in_air=OFF' means the region is undulator, so there is no phase slippage but no FEL calculation or amplification. 
 
 
