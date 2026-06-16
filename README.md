@@ -77,4 +77,59 @@ For example, parameters of 'number=3', 'start_position=2', 'interval_length=6' w
 
 For example, 'num_harmony=1' only needs and should be 'harmony0=1'.
 
-There is flexibility in setting harmonics
+There is flexibility in setting harmonics. For example, it is also possible :
+
+'num_harmony=3'
+
+'harmony0=1'
+
+'harmony1=2'
+
+'harmony1=5'
+
+
+'slices_in_bucket' defines a bucket size as number of slices. A slice means the FEL wavelengh range, and a bucket is multiple slices which is sames as the longitudinal grid size.
+
+'lambdaUs_in_iteration' should be same as 'slices_in_bucket' for present version.
+
+'ABC_N' is the number of grids for the absorbtion boundary in transverse plane.
+
+'ABC_coef' will determine how absorbing field at the absorbtion boundary, which would be determined empirically.
+
+#### Space_charge
+'Space_charge' is for Ez (longitudinal field) calculation. 
+
+Even though present version does not contain space charge effect (overall longitudinal fields driven by moving charges) it will be implemented soon.
+
+#### Wake_field
+'Wake_field' is for the longitudinal field contribution electron-driven by waveguide.
+
+'shape" has option of "Flat" or "Circular".
+
+'ac_dc' has option of "AC" or "DC".
+
+Other parameters are referred in the example input file.
+
+Once simulation runs, the files wakeE', 'wakeF' will be created right away, which are wake field of total beam profile and wake function of single electron.
+
+#### Seed
+'Seed' is the initial loading external laser field.
+
+'focus' is the longitudinal target position.
+
+#### Undulator
+'Undulator' sets undulator parameters.
+
+'undulator_type'  is "QuadPolar" for arbitrary polarization or "BiPolar" for only linear polarization. 
+
+'K0_alpha' determines the major axis of undulator field. '1' means that By direction is major, '-1' means Bx direction is major.
+
+Therefore if By direction is major, FEL major polarization lies on the x-direction.
+
+'numbers' determines number of undulator unit.
+
+'unit_start', 'unit_end', 'undulator_start', 'undulator_end' determine multiple undulator position and ranges.
+
+Considering multiple
+
+
