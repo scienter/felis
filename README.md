@@ -16,6 +16,8 @@ mh0309@postech.ac.kr
 
 2026.06.16 : Instruction version 1. 
 
+
+<br><br>
 ## 1. Installation
 
 You may install FELIS by simply typing 'make'.
@@ -27,6 +29,7 @@ Once you install mpi, hdf5(parallel), fftw, and gsl, each library path sould be 
 All library paths will be located at the 'Specify Library paths' block in 'makefile'.
 
 While installing, you may see warning messages. Mostly it is OK if not seen in error messages. Those 'warning' messages will be corrected soon.
+
 
 <br><br>
 ## 2. Running FELIS
@@ -43,6 +46,8 @@ All other simulation options are included in the input file (like 'test.inp'). A
 
 If you are familiar with FEL simulation, the example of input file will be read easily.
 
+
+<br><br>
 ## 3. Input file
 
 The input file is composed of several blocks of 'Phase_shifter', 'Save', 'Domain', 'Seed', 'Undulator', 'Wake_field', 'Chicane', 'Quad', 'EBeam'.
@@ -180,6 +185,7 @@ Electron beam parameters will be defined.
 'number_in_beamlet' determines number of particles in a beamlet. It should be 2*(max harmony). 
 
 There are multiple nodes definition such as 'z_nodes', 'energy_nodes', 'energySpread_nodes', 'emit_nodes' as long as selecting 'load_type=Polygon'.
+
 
 <br><br>
 ## 4. Postprocess
