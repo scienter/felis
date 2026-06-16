@@ -40,7 +40,7 @@ The input file is composed of several blocks of 'Phase_shifter', 'Save', 'Domain
 
 Some of blocks can be used in multiple which are 'Phase_shifter', 'Seed', 'Undulator', 'Chicane', 'Quad', and 'EBeam'.
 
-#### Phase_shifter
+#### [Phase_shifter]
 'Phase_shifter' is for the phase shifters which are located between undulators to delay electron beams compared to FEL fields.
 
 If you want multile phase shifter, 'number' will define number of phase shifters with help of 'start_position' and 'interval_length'.
@@ -55,7 +55,7 @@ For example, parameters of 'number=3', 'start_position=2', 'interval_length=6' w
 
 'phase' defines delay in the unit of 'Pi(3.141...)'.
 
-#### Save
+#### [Save]
 'Save' is for saving save option. The saved particle and field files will be written in hdf5 format.
 
 'total_length' is the total distance to simulate, and it will define max simulation step.
@@ -64,7 +64,7 @@ For example, parameters of 'number=3', 'start_position=2', 'interval_length=6' w
 
 'save_start' define starting simulation step to save file.
 
-#### Domain
+#### [Domain]
 'Domain' is for overal simulation boundary and grids.
 
 'nx' and 'ny' are number of grids in x and y direction (transverse plane).
@@ -96,12 +96,12 @@ There is flexibility in setting harmonics. For example, it is also possible :
 
 'ABC_coef' will determine how absorbing field at the absorbtion boundary, which would be determined empirically.
 
-#### Space_charge
+#### [Space_charge]
 'Space_charge' is for Ez (longitudinal field) calculation. 
 
 Even though present version does not contain space charge effect (overall longitudinal fields driven by moving charges) it will be implemented soon.
 
-#### Wake_field
+#### [Wake_field]
 'Wake_field' is for the longitudinal field contribution electron-driven by waveguide.
 
 'shape" has option of "Flat" or "Circular".
@@ -112,12 +112,12 @@ Other parameters are referred in the example input file.
 
 Once simulation runs, the files wakeE', 'wakeF' will be created right away, which are wake field of total beam profile and wake function of single electron.
 
-#### Seed
+#### [Seed]
 'Seed' is the initial loading external laser field.
 
 'focus' is the longitudinal target position.
 
-#### Undulator
+#### [Undulator]
 'Undulator' sets undulator parameters.
 
 'undulator_type'  is "QuadPolar" for arbitrary polarization or "BiPolar" for only linear polarization. 
@@ -136,4 +136,39 @@ And single undulator unit is composed of vacant area and undulator area. So vaca
 
 'in_air' determines the vacant region as undulator or not. 'in_air=ON' means the region is without undulator, so there is phase slippage between FEL and electron beam. 'in_air=OFF' means the region is undulator, so there is no phase slippage but no FEL calculation or amplification. 
 
+undulator tapering will be defined by 'linear_taper', 'quad_taper'. The unit is [1/each undulator unit].
+
+'lambdaU' is the undulator period in the unit [cm].
+
+If 'K0' is not defined, K0 will be automatically calculated from the electron beam energy, the targeted photon energy, and 'lambdaU'.
+
+#### [Quad]
+Multiple quadru-poles are determined.
+
+In 3D calculation, two '[Quad]' blocks are needed for +g and -g, where 'g' is the quadru-pole strength.
+
+Once the simulation runs, there is message for quad matching. For example,
+
+'Recommandations : quad g=38.9157, quad K=1.3654, cen_beta=22, min_beta=17.9833, max_beta=28.2389'
+
+which indicates a recommanding quadru-pole stength for matching. If 'g' values are too deviated, stop the simulation and rerun with corrected 'g' value.
+
+To check the matching, it is recommanded that test run would be in 'Static' mode for fast simulation. Then you may find 'twissFile' containing twiss parameters of the electron beam. By plotting the x- and y-component beta values, matching condition would be confirmed.
+
+#### [EBeam]
+Electron beam parameters will be defined.
+
+'load_type' determines loading longitudinal profile style of "Polygon" or "Gaussian".
+
+'noise_ONOFF' is option for shot-noise. 'noise_ONOFF=ON' is normal condition. External seed condition may needs 'noise_ONOFF=OFF'.
+
+'randon_seed_ONOFF' is for operation of the initial seed for loading particles. If 'random_seed_ONOFF=OFF', every simulation runs will show same electron distribution.
+
+'species' is for particle species. For present version, only "Electron" is available.
+
+'beamlets_in_bucket' determines number of beamlets in a bucket (a longitudinal simulation grid). Each beamlet contains multiple particles.
+
+'number_in_beamlet' determines number of particles in a beamlet. It should be 2*(max harmony). 
+
+There are multiple nodes definition such as 'z_nodes', 'energy_nodes', 'energySpread_nodes', 'emit_nodes' as long as selecting 'load_type=Polygon'.
 
