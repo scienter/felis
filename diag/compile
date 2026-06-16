@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# ==================== Specify Library paths ====================
+
+# HDF5 path
+HDF5_INCLUDE="/opt/hdf5/1.14.5/include"
+HDF5_LIB="/opt/hdf5/1.14.5/lib"
+
+# MPICXX path
+MPICXX="/opt/ompi/5.0.6/bin/mpicxx"
+
+# =====================================================
+
+# compile option
+CFLAGS="-I${HDF5_INCLUDE} -O3 -march=native -mtune=native -Wall -std=c++17 -ffast-math"
+LDFLAGS="-L${HDF5_LIB} -lhdf5 -lhdf5_hl -lz -ldl -lm"
+
+# ==================== start build ====================
+
+echo "=== FEL codes (C++) 빌드 시작 ==="
+
+# felParticle build
+echo "Building felParticle..."
+${MPICXX} -o felParticle felParticle.cpp ${CFLAGS} ${LDFLAGS}
+echo "'felParticle' is made."
+
+# felField build
+echo "Building felField..."
+${MPICXX} -o felField felField.cpp ${CFLAGS} ${LDFLAGS}
+echo "'felField' is made."
+
