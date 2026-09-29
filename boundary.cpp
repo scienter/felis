@@ -45,6 +45,9 @@ void boundary(Domain *D)
    D->maxI=D->minmax[myrank+1];
    D->subSliceN=D->maxI-D->minI;
 
+   // planePos
+   D->planeIdx = int((D->planePos-D->minZ)/(D->numSlice*D->lambda0));
+
    // Field memory setting
    size_t fieldSize = static_cast<size_t>(D->subSliceN+2)*D->nx*D->ny ;
    D->Ux=complexMemoryFlat(D->numHarmony,fieldSize);
@@ -56,6 +59,8 @@ void boundary(Domain *D)
 
    D->totalEnergyX=doubleMemoryFlat(D->maxStep,static_cast<size_t>(D->numHarmony));
    D->totalEnergyY=doubleMemoryFlat(D->maxStep,static_cast<size_t>(D->numHarmony));
+   D->powerX=doubleMemoryFlat(D->maxStep,static_cast<size_t>(D->numHarmony));
+   D->powerY=doubleMemoryFlat(D->maxStep,static_cast<size_t>(D->numHarmony));
  
    D->particle.resize(D->subSliceN+2);
    for(auto& p : D->particle) {

@@ -33,12 +33,22 @@ void loadSeed3D(Domain &D,int iteration)
    double bucketZ=D.lambda0*D.numSlice;
    double sigmaZ=D.duration*velocityC;
    double invSigma2=1.0/sigmaZ/sigmaZ;
-   double minZ=D.minZ+D.lambda0*0.5;
+   // was: D.minZ + D.lambda0*0.5 -- that half-wavelength offset is what
+   // loadSeed1D already drops (see its commented-out line below). It is
+   // negligible at X-ray/VUV lambda0 (sub-um, << sigmaZ for any sane fs
+   // duration) but at long wavelengths (THz: lambda0 ~ 100 um) it can
+   // exceed sigmaZ outright, pushing the temporal Gaussian's evaluation
+   // point many sigma from its own centre and silently suppressing the
+   // loaded seed power by orders of magnitude (verified: THz case loaded
+   // at 1.94e-7 x the requested power with a 30 fs duration; matches
+   // exp(-0.25*(lambda0/2/sigmaZ)^2) computed from these exact numbers).
+   double minZ=D.minZ;
    double zR=D.zR;
    double focus=D.focus;
    double ks=D.ks;
    double sigR=std::sqrt(2.0)*D.spotSigR;
    int loadH=D.loadH;
+   double laserStart=D.laserStart, laserEnd=D.laserEnd;
 
 
    int startI=1, endI=D.subSliceN+1;
@@ -57,6 +67,7 @@ void loadSeed3D(Domain &D,int iteration)
       double z=(sliceI-startI+minI)*bucketZ+minZ;
       double delZ = z-focus;
       double ampZ = a0 * std::exp(-0.25*z*z*invSigma2);
+      if(z<laserStart || z>laserEnd) ampZ = 0.0;
 
       if(delZ==0.0) curv=1e100; 
       else          curv=delZ * ( 1.0 + zR*zR/(delZ*delZ) );
@@ -90,6 +101,7 @@ void loadSeed1D(Domain &D,int iteration)
    double invSigma2=1.0/sigmaZ/sigmaZ;
    //double minZ=D.minZ+D.lambda0*0.5;
    double minZ=D.minZ;
+   double laserStart=D.laserStart, laserEnd=D.laserEnd;
 
    int startI=1, endI=D.subSliceN+1;
    int minI=D.minI;
@@ -100,6 +112,7 @@ void loadSeed1D(Domain &D,int iteration)
    for(int sliceI=startI; sliceI<endI; ++sliceI) {
       double z=(sliceI-startI+minI)*bucketZ+minZ;
       double amp = factor * a0 * std::exp(-0.25*z*z*invSigma2);
+      if(z<laserStart || z>laserEnd) amp=0.0;
       D.Ux[h_pick][sliceI] = amp * (1.0+D.laserAlpha*std::exp(I*D.laserPsi));
       D.Uy[h_pick][sliceI] = amp * (-1.0+D.laserAlpha*std::exp(I*D.laserPsi));
    }

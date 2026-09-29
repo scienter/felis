@@ -8,22 +8,7 @@
 [Save]
  field_save=ON
  particle_save=ON
- density_save=OFF
- current_save=OFF
- dump_save=OFF
 
- field_format=TXT
- particle_format=TXT
- current_format=TXT
- density_format=TXT
- dump_format=HDF
-
- dump_start=1000
- dump_step=1000
-
- max_time=3500			//[minute]
-
-// max_step=10
  total_length=60	//[m]
  save_step=20
  save_start=0

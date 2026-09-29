@@ -43,6 +43,15 @@ int main(int argc, char *argv[])
 
    parameterSetting(&D,argv[1]);
 
+   // Static mode has a single slice, so only rank 0 holds particles and field;
+   // extra ranks just sit in the collectives.  Run it on one core.
+   if(D.mode==OperationMode::Static && nTasks>1) {
+      if(myrank==0)
+         std::fprintf(stderr, "Error: mode=Static uses a single slice; run with 1 MPI rank (mpirun -n 1), not %d.\n", nTasks);
+      MPI_Finalize();
+      return 1;
+   }
+
    boundary(&D);
    
    // Wake function 
@@ -61,20 +70,27 @@ int main(int argc, char *argv[])
 
    } else {
       if(myrank==0) {
-         //Create "totalEnergy", "twissFile", "bFactor" file
          FILE *out1 = fopen("totalEnergy", "w");      
          fclose(out1);
-         FILE *out2 = fopen("twissFile", "w");      
-         fprintf(out2,"#%12s %12s %12s %12s %12s %12s %12s\n",
-                  "z","emitX","betaX","alphaX","emitY","betaY","alphaY");
+         FILE *out2 = fopen("power", "w");      
          fclose(out2);
+         FILE *out3 = fopen("twissFile", "w");      
+         fprintf(out3,"#%12s %12s %12s %12s %12s %12s %12s\n",
+                  "z","emitX","betaX","alphaX","emitY","betaY","alphaY");
+         fclose(out3);
          std::string fileName3 = "bFactor";
-         std::ofstream out3(fileName3);     
-         out3 << "#z        " ;
+         std::ofstream out4(fileName3);
+         out4 << "#z        " ;
          for(int h=0; h<D.numHarmony; ++h)
-            out3 << std::setw(10) << "harmony:" << D.harmony[h];
-         out3 << "\n";
-         out3.close();
+            out4 << std::setw(12) << "rms_h" << D.harmony[h];
+         for(int h=0; h<D.numHarmony; ++h)
+            out4 << std::setw(12) << "max_h" << D.harmony[h];
+         out4 << "   // core = weight sum > 0.5*max\n";
+         out4.close();
+         std::ofstream out5("bFactorSlice");
+         out5 << "#z, then |b_h| for every slice, harmonic by harmonic  (1 + "
+              << D.numHarmony << "*" << D.sliceN << " columns)\n";
+         out5.close();
       }
       //loading Seed pulse
       loadSeed(&D,iteration);
@@ -102,6 +118,7 @@ int main(int argc, char *argv[])
          if(D.mode == OperationMode::Static) {
             std::string fileName = "Power" + std::to_string(iteration);
             saveFieldsToTxt(D, fileName);
+            saveComplexFieldBin(D, "Field" + std::to_string(iteration) + ".bin");
             for (size_t s=0; s<D.loadList.size(); ++s) {
                fileName = std::to_string(s) + "Particle" + std::to_string(iteration);
                saveParticlesToTxt(D, s, fileName);
@@ -121,6 +138,7 @@ int main(int argc, char *argv[])
 
       // Update Files
       updateTotalEnergy(&D,iteration);
+      updatePower(&D,iteration);
       calculate_twiss(D,iteration);
       updatebFactor(D,iteration);
 

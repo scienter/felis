@@ -242,6 +242,16 @@ void solve_Sc_3D(Domain &D,int iteration)
    double xi = 0.25*K0*K0*(1.0-ue*ue)/(1.0+(1.0+ue*ue)*K0*K0*0.5);
    double coef_Ez = eCharge*velocityC*velocityC*mu0*ks*(1.0+0.5*(1.0+ue*ue)*K0*K0)/(2.0*M_PI*D.lambda0*D.numSlice*gamR*gamR);
 
+   // Even-harmonic source: exact adjoint of the coupling in push_theta_gamma_3D
+   // (see the comment there).  The push applies p -> p + i*gam/(H*ks)*grad to U,
+   // so the deposit is p*W - i*gam/(H*ks)*dW/dx_particle, with W the bilinear weight.
+   const double cEven = 2.0*K0/((1.0+K0*K0*0.5*(1.0+ue*ue))*std::sqrt(1.0+ue*ue));
+   const cplx evA = 0.5*(1.0+K0_alpha) + 0.5*(1.0-K0_alpha)*ue*ue + I*K0_alpha*ue;
+   const cplx evB = 0.5*(1.0+K0_alpha)*ue*ue + 0.5*(1.0-K0_alpha) - I*K0_alpha*ue;
+   const cplx ePhiM = std::exp(-I*Phi*0.5);
+   const cplx ePhiP = std::conj(ePhiM);
+   const double sgn[2]={-1.0,1.0};
+
    int s=0;
    for(auto& LL : D.loadList) {
       for(int sliceI=startI; sliceI<endI; ++sliceI)
@@ -256,15 +266,6 @@ void solve_Sc_3D(Domain &D,int iteration)
             double gam=p->gamma[n];
             double px=p->px[n];       
             double py=p->py[n];
-            double xi2 = std::sqrt(2.0) * K0 / (1.0+K0*K0*0.5*(1.0+ue*ue)) 
-                       * std::sqrt((1+K0_alpha)*(px*px+ue*ue*py*py)+(1-K0_alpha)*(px*px*ue*ue+py*py));
-            double B=std::atan( 
-               2.0*K0_alpha*ue*(px-py) 
-               / ((1.0+K0_alpha)*(px+ue*ue*py)+(1-K0_alpha)*(px*ue*ue+py))
-            );
-            cplx expP=std::exp(I*(B-Phi*0.5));
-            cplx expM=std::conj(expP);
-
             int idxI=(x-minX)/dx;
             int idxJ=(y-minY)/dy;
             size_t idx = sliceI*N + idxJ*nx + idxI;
@@ -276,36 +277,48 @@ void solve_Sc_3D(Domain &D,int iteration)
                   double dbH = static_cast<double>(H);
                   if(H%2==1)  {  //odd harmony
                      double sign = ((H-1)/2 % 2 ==0) ? 1.0 : -1.0;
-                     int idx=(dbH*xi)/dBessel;
-                     w[1]=(dbH*xi/dBessel)-idx; w[0]=1.0-w[1];
+                     int idxB=(dbH*xi)/dBessel;
+                     w[1]=(dbH*xi/dBessel)-idxB; w[0]=1.0-w[1];
                      int order=(H-1)/2;
-                     double J1=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     double J1=D.BesselJ[idxB][order]*w[0]+D.BesselJ[idxB+1][order]*w[1];
                      order=(H+1)/2;
-                     double J2=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     double J2=D.BesselJ[idxB][order]*w[0]+D.BesselJ[idxB+1][order]*w[1];
                      fx=sign*(J1-K0_alpha*J2);
                      fy=sign*(J1+K0_alpha*J2);
+                     cplx macro_expTheta_coef=dbH*macro*coef_U*std::exp(-I*dbH*(theta+Phi*0.5))/gam;
+                     for(int ii=0; ii<2; ++ii)
+                        for(int jj=0; jj<2; ++jj) {
+                           D.ScUx[h][idx + jj*nx + ii]
+                               -= etaX * wx[ii] * wy[jj] * fx * macro_expTheta_coef;
+                           D.ScUy[h][idx + jj*nx + ii]
+                               -= etaY * wx[ii] * wy[jj] * fy * macro_expTheta_coef;
+                        }
 
                   } else {
                      double sign = (H/2 % 2 ==0) ? 1.0 : -1.0;
-                     int idx=(dbH*xi)/dBessel;
-                     w[1]=(dbH*xi/dBessel)-idx; w[0]=1.0-w[1];
+                     int idxB=(dbH*xi)/dBessel;
+                     w[1]=(dbH*xi/dBessel)-idxB; w[0]=1.0-w[1];
                      int order=(H-2)/2;
-                     double J1=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     double J1=D.BesselJ[idxB][order]*w[0]+D.BesselJ[idxB+1][order]*w[1];
                      order=H/2;
-                     double J2=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     double J2=D.BesselJ[idxB][order]*w[0]+D.BesselJ[idxB+1][order]*w[1];
                      order=(H+2)/2;
-                     double J3=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
-                     fx=sign*xi2*dbH*0.5*(expM*(J1-K0_alpha*J2)+expP*(J2-K0_alpha*J3));
-                     fy=sign*xi2*dbH*0.5*(expM*(J1+K0_alpha*J2)+expP*(J2+K0_alpha*J3));
+                     double J3=D.BesselJ[idxB][order]*w[0]+D.BesselJ[idxB+1][order]*w[1];
+                     cplx g=I*gam/(dbH*ks);
+                     cplx macro_expTheta_coef=dbH*macro*coef_U*std::exp(-I*dbH*(theta+Phi*0.5))/gam;
+                     for(int ii=0; ii<2; ++ii)
+                        for(int jj=0; jj<2; ++jj) {
+                           double W=wx[ii]*wy[jj];
+                           double Dx=sgn[ii]*wy[jj]/dx, Dy=sgn[jj]*wx[ii]/dy;
+                           cplx Px=px*W-g*Dx, Py=py*W-g*Dy;
+                           cplx Zb=cEven*(std::conj(evA)*Px+std::conj(evB)*Py);  // conj of push xi2*exp(+iB)
+                           cplx Z =cEven*(evA*Px+evB*Py);                        // conj of push xi2*exp(-iB)
+                           fx=sign*dbH*0.5*(ePhiP*Zb*(J1-K0_alpha*J2)+ePhiM*Z*(J2-K0_alpha*J3));
+                           fy=sign*dbH*0.5*(ePhiP*Zb*(J1+K0_alpha*J2)+ePhiM*Z*(J2+K0_alpha*J3));
+                           D.ScUx[h][idx + jj*nx + ii] -= etaX * fx * macro_expTheta_coef;
+                           D.ScUy[h][idx + jj*nx + ii] -= etaY * fy * macro_expTheta_coef;
+                        }
                   }
-                  cplx macro_expTheta_coef=dbH*macro*coef_U*std::exp(-I*dbH*(theta+Phi*0.5))/gam;
-                  for(int ii=0; ii<2; ++ii)
-                     for(int jj=0; jj<2; ++jj) { 
-                        D.ScUx[h][idx + jj*nx + ii]
-                            -= etaX * wx[ii] * wy[jj] * fx * macro_expTheta_coef;
-                        D.ScUy[h][idx + jj*nx + ii]
-                            -= etaY * wx[ii] * wy[jj] * fy * macro_expTheta_coef;
-                     }
                }		//End of harmony
             }	//End of if(idxI,idxJ)
          }	         //End of for(n)

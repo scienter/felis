@@ -74,11 +74,13 @@ typedef struct _Domain
    std::vector<std::vector<cplx>> Ux,Uy,ScUx,ScUy;
    std::vector<std::vector<cplx>> Ez;
    std::vector<std::vector<double>> totalEnergyX,totalEnergyY;
+   std::vector<std::vector<double>> powerX,powerY;
 
 
    //Save option
-   int maxStep,saveStep,saveStart;
+   int maxStep,saveStep,saveStart,planeIdx;
    bool fieldSave,particleSave;
+   double planePos;
 
    //Domain box
    int sliceN,subSliceN,nx,ny,minI,maxI;
@@ -130,7 +132,7 @@ typedef struct _Domain
 
    //Seed
    int loadH;
-   double laserAlpha;
+   double laserAlpha,laserStart,laserEnd;
    double P0,duration,spotSigR,a0,zR,focus,polarity,laserPsi;
 
    //Wake
@@ -156,6 +158,7 @@ void push_theta_gamma(Domain *D,int iteration);
 void drift_theta_gamma(Domain &D,int iteration);
 void solveField(Domain *D,int iteration);
 void updateTotalEnergy(Domain *D,int iteration);
+void updatePower(Domain *D,int iteration);
 void updatebFactor(const Domain &D, int iteration);
 void transversePush(Domain *D,int iteration);
 void calculate_twiss(Domain &D,int iteration);
@@ -171,6 +174,7 @@ void MPI_Transfer1F_Zplus(std::vector<std::vector<cplx>>& f1,
 void saveParticleHDF(Domain *D,int iteration);
 void saveFieldHDF(Domain *D,int iteration);
 void saveFieldsToTxt(const Domain &D, const std::string& fileName);
+void saveComplexFieldBin(const Domain &D, const std::string& fileName);
 void saveParticlesToTxt(const Domain &D, int species, const std::string& fileName);
 void loadSeed(Domain *D,int iteration);
 void periodicParticles(Domain &D,int iteration);

@@ -48,6 +48,7 @@ struct LoadList  {
    double alphaX,alphaY;
    double betaX,betaY;
    bool transFlat;
+   bool momentMatch;
 
    // For Polygon mode
    int znodes,Enodes,EmitNodes,ESnodes;

@@ -86,6 +86,87 @@ void updateTotalEnergy(Domain *D,int iteration)
 
 }
 
+void updatePower(Domain *D,int iteration)
+{
+   int myrank, nTasks;
+   MPI_Status status; 
+   MPI_Comm_size(MPI_COMM_WORLD, &nTasks);
+   MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
+   int numHarmony=D->numHarmony;
+   int startI=1;  
+   int endI=D->subSliceN+1;
+   
+   double dt=D->numSlice*D->lambda0/velocityC;
+   double dz=D->dz;
+   int nx=D->nx;
+   int ny=D->ny;
+   int N=nx*ny;
+
+   if (D->planeIdx>=D->minI && D->planeIdx<D->maxI) {
+      int planeIdx = D->planeIdx - D->minI +1;
+      
+      for(int h=0; h<numHarmony; ++h) {
+         double powerX=0.0;
+         double powerY=0.0;
+         for(int idxJ=0; idxJ<N; ++idxJ) {
+            powerX += std::norm(D->Ux[h][planeIdx*N + idxJ]);
+            powerY += std::norm(D->Uy[h][planeIdx*N + idxJ]);
+         }
+         D->powerX[iteration][h]=powerX;
+         D->powerY[iteration][h]=powerY;
+      }
+   }
+      
+   double area=D->dx*D->dy;
+   if(D->dimension==1)
+      area=2.0*M_PI*D->spotSigR*D->spotSigR;
+
+   double coef=eMass*velocityC*velocityC*D->ks/eCharge;
+   double coef2=coef*coef/(2.0*Z0)*area;
+
+   std::vector<double> sendDataX(numHarmony);
+   std::vector<double> sendDataY(numHarmony);
+   std::vector<double> recvDataX(numHarmony);
+   std::vector<double> recvDataY(numHarmony);
+   for(int h = 0; h < numHarmony; ++h) {
+      sendDataX[h] = D->powerX[iteration][h];
+      sendDataY[h] = D->powerY[iteration][h];
+   }
+
+   if (myrank != 0) {
+      MPI_Send(sendDataX.data(),numHarmony,MPI_DOUBLE,0,myrank,MPI_COMM_WORLD);
+      MPI_Send(sendDataY.data(),numHarmony,MPI_DOUBLE,0,myrank,MPI_COMM_WORLD);
+   } else {
+      // Rank 0: receiving data from other ranks and summing up.
+      for(int i = 1; i < nTasks; ++i) {
+         MPI_Recv(recvDataX.data(),numHarmony,MPI_DOUBLE,i,i,MPI_COMM_WORLD, &status);
+         MPI_Recv(recvDataY.data(),numHarmony,MPI_DOUBLE,i,i,MPI_COMM_WORLD, &status);
+         for(int h = 0; h < numHarmony; ++h) {
+            D->powerX[iteration][h] += recvDataX[h];
+            D->powerY[iteration][h] += recvDataY[h];
+         }
+      }
+      
+      FILE *out = fopen("power", "a+");
+      if (out == nullptr) {
+         std::cerr << "Error: cannot open totalEnergy file" << std::endl;
+         return;
+      }
+
+      double z = iteration * D->dz + (D->minZ+D->maxZ)*0.5;
+      fprintf(out, "%.15g", z);
+
+      for (int h = 0; h < numHarmony; ++h) {
+         fprintf(out, " %g", D->powerX[iteration][h] * coef2);
+         fprintf(out, " %g", D->powerY[iteration][h] * coef2);
+      }
+      fprintf(out, "\n");
+      fclose(out);
+   }
+
+}
+
 /*
 void saveTotalEnergy(Domain *D)
 {

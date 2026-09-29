@@ -52,11 +52,11 @@ void transversePush(Domain *D,int iteration)
 
    if (D->undType==UndMode::BiPolar) {
       if (D->K0_alpha==1) {
-         xCoef=1;
+         xCoef=2;
          yCoef=0;
       } else if (D->K0_alpha==-1) {
          xCoef=0;
-         yCoef=1;
+         yCoef=2;
       } 
    } else if (D->undType==UndMode::QuadPolar) {
       xCoef=1;
@@ -122,10 +122,9 @@ void drift_theta_gamma(Domain &D,int iteration)
    MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
 
    int nx=D.nx, ny=D.ny, N=nx*ny;
-   double dz=D.dz;    
-   double ks=D.ks;   
+   double dz=D.dz;
+   double ks=D.ks;
    double ku=D.ku;
-   double gamR=D.gamR;
    double dx=D.dx, dy=D.dy;
    double minX=D.minX, minY=D.minY;
    int minI = D.minI;
@@ -178,7 +177,13 @@ void drift_theta_gamma(Domain &D,int iteration)
                   double absUy2 = std::norm(Uy[h]);
                   sumU2 += (absUx2 + absUy2)/(2.0*H*H);
                }
-               double tmp = ku-ks/(2.0*gamR*gamR)*(K2+sumU2);
+               // Use the particle's OWN gamma, not a fixed reference gamR:
+               // push_theta_gamma_3D (inside the undulator) advances theta with
+               // ks/(2*gam*gam), so a drift computed with a fixed gamR is
+               // discontinuous with it at every module boundary and gives every
+               // particle the same phase-slip rate regardless of its actual
+               // energy, i.e. no chromatic (energy-dependent) slippage at all.
+               double tmp = ku-ks/(2.0*gam0*gam0)*(K2+sumU2);
                p->theta[n]+=tmp*dz;
                p->theta[n]-=dz*wakeE;
             }
@@ -243,19 +248,36 @@ void push_theta_gamma_3D(Domain &D,int iteration)
    //double xi = ks/ku*K0*K0*(1.0-ue*ue)/(8.0*gam*gam);
    double xi = 0.25*K0*K0*(1.0-ue*ue)/(1.0+(1.0+ue*ue)*K0*K0*0.5);
 
+   // Even-harmonic coupling.  The old form xi2*exp(iB) with xi2=sqrt(..), B=atan(..)
+   // dropped the sign of (px,py) (for ue=0, B=0 and xi2~|px|).  The same modulus and
+   // phase written as a LINEAR form in (px,py) keeps the sign:
+   //    xi2*exp(+iB) = cEven*(evA*px + evB*py),  xi2*exp(-iB) = cEven*(conj(evA)*px + conj(evB)*py)
+   // Linearity lets (px,py) be replaced by the relative-angle operator
+   //    p -> p + i*gam/(H*ks)*grad   acting on U_H,
+   // i.e. electron angle minus radiation angle.  This is the wiggle excursion
+   // K/(gam*ku)*sin(ku z) sampling the transverse field gradient; without it an
+   // electron with px=py=0 could not radiate even harmonics at any angle.
+   const double cEven = 2.0*K0/((1.0+K0*K0*0.5*(1.0+ue*ue))*std::sqrt(1.0+ue*ue));
+   const cplx evA = 0.5*(1.0+K0_alpha) + 0.5*(1.0-K0_alpha)*ue*ue + I*K0_alpha*ue;
+   const cplx evB = 0.5*(1.0+K0_alpha)*ue*ue + 0.5*(1.0-K0_alpha) - I*K0_alpha*ue;
+   const cplx ePhiM = std::exp(-I*Phi*0.5);
+   const cplx ePhiP = std::conj(ePhiM);
+
    cplx fx=0.0+I*0.0;
    cplx fy=0.0+I*0.0;
    std::vector<cplx> Ux(numHarmony),Uy(numHarmony),Em(L);
+   std::vector<cplx> dUxX(numHarmony),dUxY(numHarmony),dUyX(numHarmony),dUyY(numHarmony);
+   std::vector<cplx> FU(numHarmony);
    double wakeE=0.0;
 
    for(int s=0; s<D.nSpecies; ++s)
    {
       for(int sliceI=startI; sliceI<endI; ++sliceI)
       {
-         if(D.wakeONOFF==true) 
+         if(D.wakeONOFF==true)
             wakeE=D.wakeE[sliceI-startI+minI]/(mc2*1.0e6);
 
-         p = D.particle[sliceI].head[s]->pt;         
+         p = D.particle[sliceI].head[s]->pt;
          const size_t cnt=p->x.size();
          for(size_t n=0; n<cnt; ++n) {
             double x0=p->x[n];   
@@ -268,15 +290,6 @@ void push_theta_gamma_3D(Domain &D,int iteration)
             double gam0=p->gamma[n];
     	    double K2=1.0 + pr2 + (1.0+ue*ue)*K0*K0*0.5*(1.0+ku*ku*0.5*r2);
             xi=ks/ku*K0*K0/(8.0*gam0*gam0)*(1.0-ue*ue);
-
-            double xi2 = std::sqrt(2.0) * K0 / (1.0+K0*K0*0.5*(1.0+ue*ue))
-                       * std::sqrt((1+K0_alpha)*(px*px+ue*ue*py*py)+(1-K0_alpha)*(px*px*ue*ue+py*py));
-            double B=std::atan(
-               2.0*K0_alpha*ue*(px-py)
-               / ((1.0+K0_alpha)*(px+ue*ue*py)+(1-K0_alpha)*(px*ue*ue+py))
-            );
-            cplx expP=std::exp(I*(B-Phi*0.5));
-            cplx expM=std::conj(expP);
 
             int idxI=(int)((x0-minX)/dx);
 	    int idxJ=(int)((y0-minY)/dy);
@@ -303,15 +316,61 @@ void push_theta_gamma_3D(Domain &D,int iteration)
                   }
                }
                
-               for(int h=0; h<numHarmony; ++h)  {				
+               // U and its gradient from the same bilinear interpolant, so that the
+               // gradient deposit in solve_Sc_3D is its exact adjoint.
+               const double sgn[2]={-1.0,1.0};
+               for(int h=0; h<numHarmony; ++h)  {
                   Ux[h]=0.0+I*0.0;
                   Uy[h]=0.0+I*0.0;
-                  for(int ii=0; ii<2; ++ii) 
+                  dUxX[h]=dUxY[h]=dUyX[h]=dUyY[h]=0.0+I*0.0;
+                  for(int ii=0; ii<2; ++ii)
                      for(int jj=0; jj<2; ++jj)  {
-      	                Ux[h]+=D.Ux[h][sliceI*N + (idxJ+jj)*nx + (idxI+ii)]*wx[ii]*wy[jj];
-                        Uy[h]+=D.Uy[h][sliceI*N + (idxJ+jj)*nx + (idxI+ii)]*wx[ii]*wy[jj];
+                        cplx ux=D.Ux[h][sliceI*N + (idxJ+jj)*nx + (idxI+ii)];
+                        cplx uy=D.Uy[h][sliceI*N + (idxJ+jj)*nx + (idxI+ii)];
+      	                Ux[h]+=ux*wx[ii]*wy[jj];
+                        Uy[h]+=uy*wx[ii]*wy[jj];
+                        double Dx=sgn[ii]*wy[jj]/dx, Dy=sgn[jj]*wx[ii]/dy;
+                        dUxX[h]+=ux*Dx;  dUxY[h]+=ux*Dy;
+                        dUyX[h]+=uy*Dx;  dUyY[h]+=uy*Dy;
                      }
                }
+
+               // Harmonic coupling (etaX*fx*Ux - etaY*fy*Uy) does not depend on the
+               // RK stage, so build it once per particle.
+               for(int h=0; h<numHarmony; ++h)  {
+                  int H = D.harmony[h];
+                  int idx=(1.0*H*xi)/dBessel;
+                  w[1]=(H*xi/dBessel)-idx; w[0]=1.0-w[1];
+                  if(H%2==1)  {  //odd harmony
+                     double sign = ((H-1)/2 % 2 ==0) ? 1.0 : -1.0;
+                     int order=(H-1)/2;
+                     double J1=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     order=(H+1)/2;
+                     double J2=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     fx=sign*(K0_alpha*J1-J2);
+                     fy=sign*(K0_alpha*J1+J2);
+                     FU[h]=etaX*fx*Ux[h]-etaY*fy*Uy[h];
+                  } else {    //even harmony
+                     double sign = (H/2 % 2 ==0) ? 1.0 : -1.0;
+                     int order=(H-2)/2;
+                     double J1=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     order=H/2;
+                     double J2=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     order=(H+2)/2;
+                     double J3=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
+                     cplx g=I*gam0/(H*ks);
+                     cplx PxX=px*Ux[h]+g*dUxX[h], PyX=py*Ux[h]+g*dUxY[h];
+                     cplx PxY=px*Uy[h]+g*dUyX[h], PyY=py*Uy[h]+g*dUyY[h];
+                     cplx ZX =cEven*(evA*PxX+evB*PyX);                        // xi2*exp(+iB)*U
+                     cplx ZbX=cEven*(std::conj(evA)*PxX+std::conj(evB)*PyX);  // xi2*exp(-iB)*U
+                     cplx ZY =cEven*(evA*PxY+evB*PyY);
+                     cplx ZbY=cEven*(std::conj(evA)*PxY+std::conj(evB)*PyY);
+                     cplx fxU=sign*H*0.5*(ePhiM*ZX*(K0_alpha*J1-J2)+ePhiP*ZbX*(K0_alpha*J2-J3));
+                     cplx fyU=sign*H*0.5*(ePhiM*ZY*(K0_alpha*J1+J2)+ePhiP*ZbY*(K0_alpha*J2+J3));
+                     FU[h]=etaX*fxU-etaY*fyU;
+                  }
+               }
+
                double sumU2=0.0;
                for(int h=0; h<numHarmony; ++h)  {
                   int H = D.harmony[h];
@@ -335,30 +394,7 @@ void push_theta_gamma_3D(Domain &D,int iteration)
 
                   for(int h=0; h<numHarmony; ++h)  {
                      int H = D.harmony[h];
-                     int idx=(1.0*H*xi)/dBessel;
-                     w[1]=(H*xi/dBessel)-idx; w[0]=1.0-w[1];
-                     if(H%2==1)  {  //odd harmony
-                        double sign = ((H-1)/2 % 2 ==0) ? 1.0 : -1.0;
-                        int order=(H-1)/2;
-                        double J1=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
-                        order=(H+1)/2;
-                        double J2=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
-                        fx=sign*(K0_alpha*J1-J2);
-                        fy=sign*(K0_alpha*J1+J2);
-                     } else {    //even harmony
-                        double sign = (H/2 % 2 ==0) ? 1.0 : -1.0;
-                        int idx=(H*xi)/dBessel;
-                        w[1]=(H*xi/dBessel)-idx; w[0]=1.0-w[1];
-                        int order=(H-2)/2;
-                        double J1=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
-                        order=H/2;
-                        double J2=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
-                        order=(H+2)/2;
-                        double J3=D.BesselJ[idx][order]*w[0]+D.BesselJ[idx+1][order]*w[1];
-                        fx=sign*xi2*H*0.5*(expP*(K0_alpha*J1-J2)+expM*(K0_alpha*J2-J3));
-                        fy=sign*xi2*H*0.5*(expP*(K0_alpha*J1+J2)+expM*(K0_alpha*J2+J3));
-                     }
-                     cplx tmpComp=std::exp(I*(1.0*H)*(th+Phi*0.5))*(etaX*fx*Ux[h]-etaY*fy*Uy[h]);
+                     cplx tmpComp=std::exp(I*(1.0*H)*(th+Phi*0.5))*FU[h];
                      sumTh += std::real(I*tmpComp)/(1.0*H);
                      sumG += std::real(tmpComp)/(2.0*gam);
                   }  //End of harmonics

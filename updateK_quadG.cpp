@@ -11,6 +11,7 @@ void updateK_quadG(Domain *D,int iteration,double half)
    bool inUnd = false;
    bool inInter = false;
    bool airPosition = false;
+   bool trueVacuum = false;   // in_air=ON in the [Undulator] block for this intersection
    QuadList QD{};
 
    int myrank, nTasks;
@@ -41,8 +42,14 @@ void updateK_quadG(Domain *D,int iteration,double half)
                undType=UL.type;
 	            lambdaU=UL.lambdaU;
             } else {
+               // Always field-free here: the undulator magnet does not
+               // physically extend into the intersection, so aw=0 regardless
+               // of in_air (that flag only ever selected whether the ponderomotive
+               // phase kept advancing at the old undulator's resonance, which was
+               // never a real "the field is still on" choice to begin with).
                inInter=true;
-               if (UL.air==true) airPosition=true; 
+               airPosition=true;
+               if (UL.air==true) trueVacuum=true;   // in_air=ON: no phase-reference correction at all
             }
          }
       }   
@@ -59,10 +66,32 @@ void updateK_quadG(Domain *D,int iteration,double half)
    if(inUnd==false && inInter==false) airPosition=true;
    if(inUnd==true) D->currentFlag=true;
    if(airPosition==true) {
-      D->ku=0.0;       // for drift calculation
+      // Field-free drift: aw=0 always here (the magnet does not physically
+      // extend into the intersection) -- drift_theta_gamma() never uses K0.
+      // What's left to choose is which theta REFERENCE the drift uses:
+      //
+      //   in_air=OFF (trueVacuum=false, default) : the GENESIS 1.3 v4 choice.
+      //     ku=0 literally would leave every particle slipping in theta at
+      //     the full vacuum rate ks/(2*gamma^2) -- about -88 rad/m for this
+      //     benchmark, ~14 full 2*pi rotations over one 1.008 m break -- even
+      //     one sitting exactly on the reference energy.  GENESIS substitutes
+      //     a "virtual" ku so an on-resonance particle stays at a fixed theta
+      //     through the break, exactly as it would inside a matched undulator
+      //     (BeamSolver.cpp: "in the case of drifts - the beam stays in phase
+      //     if it has the reference energy").  Matching this reproduces
+      //     GENESIS's gain curve to ~1% (was -13.7 % before this fix, when
+      //     the old in_air=OFF instead kept the previous module's real K0 and
+      //     ku, i.e. treated the break as if the undulator field itself were
+      //     still on).
+      //
+      //   in_air=ON (trueVacuum=true) : no phase-reference correction at all,
+      //     ku=0 exactly -- the raw, uncompensated vacuum drift.  Useful for
+      //     seeing what that reference correction is worth, not for matching
+      //     GENESIS.
+      D->ku = trueVacuum ? 0.0 : 0.5*D->ks/(D->gamR*D->gamR);
       D->driftFlag=true;
       D->currentFlag=false;
-   } 
+   }
 
    //-------------- update Quad -----------------//
    double g=0;
