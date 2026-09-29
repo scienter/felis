@@ -94,6 +94,10 @@ typedef struct _Domain
    // ABC condition
    int abcN;
    double abcSig;
+
+   // even-harmonic angular filter (evenFilter.cpp)
+   bool evenFilterON;
+   double evenFilterTheta;   // [rad]; 0 -> default from K0, ue, gamR
    std::vector<double> ABCsigX, ABCsigY;
    std::vector<cplx>   ABCsX, ABCsY;
    std::vector<cplx>   ABCalpha, ABCalphaP;
@@ -175,6 +179,12 @@ void saveParticleHDF(Domain *D,int iteration);
 void saveFieldHDF(Domain *D,int iteration);
 void saveFieldsToTxt(const Domain &D, const std::string& fileName);
 void saveComplexFieldBin(const Domain &D, const std::string& fileName);
+struct EvenBox { int i0, i1, j0, j1; };   // grid window [i0,i1) x [j0,j1)
+void setupEvenFilter(Domain &D);
+bool evenFiltered(const Domain &D, int h);
+EvenBox evenFilterBox(const Domain &D, int sliceI);
+void applyEvenFilter(const Domain &D, int h, cplx *slice, const EvenBox &w);
+void applyEvenFilterCopy(const Domain &D, int h, const cplx *src, cplx *dst, const EvenBox &w);
 void saveParticlesToTxt(const Domain &D, int species, const std::string& fileName);
 void loadSeed(Domain *D,int iteration);
 void periodicParticles(Domain &D,int iteration);

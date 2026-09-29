@@ -270,12 +270,31 @@ void push_theta_gamma_3D(Domain &D,int iteration)
    std::vector<cplx> FU(numHarmony);
    double wakeE=0.0;
 
+   // Field the particles read, per harmonic.  Even harmonics read an angularly
+   // filtered copy of the slice (same filter as the deposit in solve_Sc_3D, so
+   // push and deposit stay adjoint); the field itself is left untouched.
+   std::vector<const cplx*> sUx(numHarmony), sUy(numHarmony);
+   std::vector<std::vector<cplx>> fUx(numHarmony), fUy(numHarmony);
+
    for(int s=0; s<D.nSpecies; ++s)
    {
       for(int sliceI=startI; sliceI<endI; ++sliceI)
       {
          if(D.wakeONOFF==true)
             wakeE=D.wakeE[sliceI-startI+minI]/(mc2*1.0e6);
+
+         // filtered only inside the particle window, which is all the push reads
+         const EvenBox win=evenFilterBox(D,sliceI);
+         for(int h=0; h<numHarmony; ++h) {
+            const cplx *ux=&D.Ux[h][static_cast<size_t>(sliceI)*N];
+            const cplx *uy=&D.Uy[h][static_cast<size_t>(sliceI)*N];
+            if(evenFiltered(D,h)) {
+               fUx[h].resize(N);  applyEvenFilterCopy(D,h,ux,fUx[h].data(),win);
+               fUy[h].resize(N);  applyEvenFilterCopy(D,h,uy,fUy[h].data(),win);
+               ux=fUx[h].data();  uy=fUy[h].data();
+            }
+            sUx[h]=ux;  sUy[h]=uy;
+         }
 
          p = D.particle[sliceI].head[s]->pt;
          const size_t cnt=p->x.size();
@@ -325,8 +344,8 @@ void push_theta_gamma_3D(Domain &D,int iteration)
                   dUxX[h]=dUxY[h]=dUyX[h]=dUyY[h]=0.0+I*0.0;
                   for(int ii=0; ii<2; ++ii)
                      for(int jj=0; jj<2; ++jj)  {
-                        cplx ux=D.Ux[h][sliceI*N + (idxJ+jj)*nx + (idxI+ii)];
-                        cplx uy=D.Uy[h][sliceI*N + (idxJ+jj)*nx + (idxI+ii)];
+                        cplx ux=sUx[h][(idxJ+jj)*nx + (idxI+ii)];
+                        cplx uy=sUy[h][(idxJ+jj)*nx + (idxI+ii)];
       	                Ux[h]+=ux*wx[ii]*wy[jj];
                         Uy[h]+=uy*wx[ii]*wy[jj];
                         double Dx=sgn[ii]*wy[jj]/dx, Dy=sgn[jj]*wx[ii]/dy;

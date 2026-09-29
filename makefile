@@ -23,7 +23,7 @@ $(info === compile for Your Server ===)
 
 
 EXEC = show
-OBJS = main.o findparam.o parameterSetting.o boundary.o loadBeam.o updateK_quadG.o particlePush.o solveField.o updateTotalEnergy.o saveFile.o twiss.o loadSeed.o rearrangeParticles.o wakeField.o saveParticleHDF.o saveFieldHDF.o fieldShareZ.o restoreFieldHDF.o restoreParticleHDF.o
+OBJS = main.o findparam.o evenFilter.o parameterSetting.o boundary.o loadBeam.o updateK_quadG.o particlePush.o solveField.o updateTotalEnergy.o saveFile.o twiss.o loadSeed.o rearrangeParticles.o wakeField.o saveParticleHDF.o saveFieldHDF.o fieldShareZ.o restoreFieldHDF.o restoreParticleHDF.o
 
 ##selfseed.o loadSeed.o twiss.o wakeField.o chicane.o saveFile.o restoreDumpHDF.o
 

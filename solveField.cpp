@@ -413,6 +413,19 @@ void solve_Sc_3D(Domain &D,int iteration)
       s++;
    }
 
+   // Angular filter on the even-harmonic source, once all species have deposited
+   // (the particles read the field through the same filter, see push_theta_gamma_3D).
+   // Only the window around the slice's particles is transformed (the source is
+   // zero elsewhere).
+   for(int sliceI=startI; sliceI<endI; ++sliceI) {
+      const EvenBox win=evenFilterBox(D,sliceI);
+      for(int h=0; h<numHarmony; ++h)
+         if(evenFiltered(D,h)) {
+            applyEvenFilter(D,h,&D.ScUx[h][static_cast<size_t>(sliceI)*N],win);
+            applyEvenFilter(D,h,&D.ScUy[h][static_cast<size_t>(sliceI)*N],win);
+         }
+   }
+
 }
 
 

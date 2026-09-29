@@ -120,6 +120,12 @@ void parameterSetting(Domain *D,const char *input)
    if(FindParameters("Domain",1,"ABC_coef",input,str)) D->abcSig=atof(str);
    else  D->abcSig=1;
 
+   //Even-harmonic angular filter (evenFilter.cpp)
+   if(FindParameters("Domain",1,"even_filter",input,str)) D->evenFilterON=whatONOFF(str);
+   else  D->evenFilterON=true;
+   if(FindParameters("Domain",1,"even_filter_angle",input,str)) D->evenFilterTheta=atof(str)*1e-6;
+   else  D->evenFilterTheta=0.0;
+
 
    if(FindParameters("Domain",1,"num_harmony",input,str)) D->numHarmony=atoi(str);
    else { D->numHarmony=1; }

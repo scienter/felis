@@ -53,6 +53,7 @@ int main(int argc, char *argv[])
    }
 
    boundary(&D);
+   setupEvenFilter(D);
    
    // Wake function 
    wakeFunction(&D,iteration);
